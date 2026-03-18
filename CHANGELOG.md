@@ -2,6 +2,43 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.1 - 2026-03-19
+
+### Added
+
+- Added grouped public lightbox navigation for same-coordinate photos with previous/next controls and direct page dots
+- Added screen-space thumbnail spreading to reduce overlap between nearby photo markers
+- Added thin connector lines from exact globe anchor points to displaced public thumbnails
+- Added country border lines to the globe texture for clearer map reading
+- Added a local `verify` workflow and project-local Node launcher for easier environment validation
+
+### Changed
+
+- Changed cluster count labels so they stay bound to the globe and always face the viewer
+- Changed globe thumbnail mode to appear earlier during zoom-in
+- Changed globe thumbnail cards to render smaller on the sphere
+- Changed camera behavior to allow deeper zoom and wider polar tilt
+- Changed globe auto-rotation speed to scale linearly with zoom and slow down much more at maximum zoom-in
+- Changed the public globe styling toward a lighter `Observable`-inspired map look with softer oceans, lighter land, finer coastlines, and clearer globe edge lighting
+- Changed globe texture generation from fitted land projection to canonical equirectangular projection so geographic points align with the rendered map
+- Changed public thumbnails from globe-attached 3D cards to a managed screen-space overlay layer
+- Changed the homepage info panel into a right-aligned top-bar control with a collapsible translucent panel
+
+### Improved
+
+- Improved local compatibility by normalizing legacy absolute image paths in stored metadata
+- Improved globe marker readability by placing count text in front of orange markers and reducing city label outline weight
+- Improved public viewing flow with smoother focus rotation toward the selected photo location
+- Improved front/back hemisphere visibility handling for public thumbnails
+- Improved globe rendering balance by using lighter-weight world outline data while preserving visible coastlines and borders
+
+### Fixed
+
+- Fixed grouped photo browsing so same-location images can be paged within the public lightbox
+- Fixed map/marker misalignment caused by texture projection fitting instead of strict equirectangular mapping
+- Fixed public thumbnail scaling so thumbnails no longer grow proportionally with globe zoom
+- Fixed right-side info panel behavior so collapsed state no longer shows a persistent background window
+
 ## 0.1.0 - 2026-03-18
 
 ### Added

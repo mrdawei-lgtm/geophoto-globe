@@ -67,24 +67,32 @@ export function PublicGlobePage() {
 
   return (
     <main className="page public-page">
+      <div className={`topbar-panel floating-panel ${panelOpen ? "open" : "collapsed"}`}>
+        <div className="floating-panel-header">
+          <button type="button" className="panel-toggle" onClick={() => setPanelOpen((value) => !value)}>
+            {panelOpen ? "Hide" : "Info"}
+          </button>
+        </div>
+        <div className={`floating-panel-body ${panelOpen ? "open" : "collapsed"}`}>
+          <div className="floating-summary">
+            <span>Drag to rotate the globe.</span>
+            <span>Zoom in to switch from clusters to photo cards.</span>
+            <span>Click any photo to open the large preview.</span>
+          </div>
+          {error ? <p className="floating-error">{error}</p> : null}
+        </div>
+      </div>
       <section className="hero">
         <div className="globe-shadow-overlay" aria-hidden="true" />
         <div className="hero-scene">
-          <GlobeScene tier={tier} mode={mode} items={items as never[]} onModeChange={setMode} onSelect={openPhoto} />
-        </div>
-        <div className={`floating-panel ${panelOpen ? "open" : "collapsed"}`}>
-          <div className="floating-panel-header">
-            <button type="button" className="panel-toggle" onClick={() => setPanelOpen((value) => !value)}>
-              {panelOpen ? "Hide" : "Info"}
-            </button>
-          </div>
-          <div className={`floating-panel-body ${panelOpen ? "open" : "collapsed"}`}>
-            <p className="floating-summary">
-              Drag to rotate the globe. Zoom in to switch from clusters to photo cards. Click any photo to open the
-              large preview.
-            </p>
-            {error ? <p className="floating-error">{error}</p> : null}
-          </div>
+          <GlobeScene
+            tier={tier}
+            mode={mode}
+            items={items as never[]}
+            focus={currentPhoto ? { latitude: currentPhoto.latitude, longitude: currentPhoto.longitude } : null}
+            onModeChange={setMode}
+            onSelect={openPhoto}
+          />
         </div>
       </section>
       {selected && currentPhoto ? (

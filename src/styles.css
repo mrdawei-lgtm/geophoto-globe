@@ -1,0 +1,490 @@
+:root {
+  color-scheme: dark;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: #8f9398;
+  color: #f3f5f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.26), transparent 34%),
+    linear-gradient(180deg, #989ca1 0%, #7f8489 100%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: linear-gradient(180deg, rgba(92, 97, 103, 0.72), rgba(92, 97, 103, 0));
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.brand {
+  font-family: Georgia, serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  pointer-events: auto;
+}
+
+.page,
+.admin-shell {
+  padding: 1.25rem;
+}
+
+.public-page {
+  padding: 0;
+}
+
+.hero {
+  position: relative;
+  min-height: 100vh;
+  height: 100vh;
+}
+
+.globe-shadow-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.globe-shadow-overlay::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(160vw, 160vh);
+  height: max(160vw, 160vh);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20, 24, 29, 0) 34%, rgba(62, 68, 74, 0.16) 58%, rgba(18, 21, 26, 0.44) 78%, rgba(12, 14, 18, 0.68) 100%);
+  opacity: 1;
+}
+
+.floating-panel,
+.panel {
+  background: rgba(108, 113, 118, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0;
+  box-shadow: 0 18px 44px rgba(31, 35, 39, 0.2);
+}
+
+.floating-panel {
+  position: absolute;
+  top: 4.75rem;
+  left: 1.25rem;
+  z-index: 10;
+  width: min(320px, calc(100vw - 2.5rem));
+  padding: 0.8rem;
+  background:
+    linear-gradient(180deg, rgba(124, 129, 134, 0.9), rgba(108, 113, 118, 0.78)),
+    rgba(108, 113, 118, 0.58);
+  backdrop-filter: blur(18px) saturate(140%);
+  transition:
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    width 180ms ease,
+    padding 180ms ease;
+}
+
+.floating-panel.open {
+  box-shadow: 0 22px 54px rgba(31, 35, 39, 0.24);
+}
+
+.floating-panel.collapsed {
+  width: auto;
+  padding: 0.55rem;
+  background: rgba(120, 125, 130, 0.9);
+}
+
+.floating-panel-header {
+  display: block;
+}
+
+.panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.82rem;
+  min-width: 74px;
+  font-size: 0.84rem;
+  background: rgba(232, 236, 238, 0.92);
+}
+
+.floating-panel-body {
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+  transition:
+    max-height 180ms ease,
+    opacity 180ms ease,
+    margin-top 180ms ease;
+}
+
+.floating-panel-body.open {
+  max-height: 240px;
+  opacity: 1;
+  margin-top: 0.8rem;
+}
+
+.floating-panel-body.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+
+.floating-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #f5f7f8;
+}
+
+.floating-error {
+  margin: 0;
+  color: #ffe3e3;
+  font-size: 0.88rem;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  color: #8fcbff;
+  margin: 0;
+}
+
+.hero-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  border-radius: 0;
+  z-index: 2;
+}
+.admin-toolbar,
+.inline-row,
+.grid-two,
+.cms-grid,
+.edit-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+.toolbar-group {
+  background: rgba(12, 30, 44, 0.68);
+  border: 1px solid rgba(164, 201, 230, 0.12);
+  border-radius: 999px;
+  padding: 0.7rem 0.9rem;
+  backdrop-filter: blur(12px);
+}
+
+.admin-toolbar {
+  grid-template-columns: 1.2fr 1fr;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.toolbar-group input,
+.edit-form input,
+.edit-form textarea,
+.edit-form select {
+  width: 100%;
+  background: rgba(1, 12, 18, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem;
+}
+
+button,
+.file-button {
+  background: linear-gradient(135deg, #7bd0ff, #d87d4a);
+  color: #08131b;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.file-button input {
+  display: none;
+}
+
+button.danger {
+  background: linear-gradient(135deg, #ff9a7d, #ff5757);
+}
+
+.cms-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.photo-card {
+  padding: 0.75rem;
+}
+
+.photo-card.selected {
+  outline: 2px solid #87d4ff;
+}
+
+.photo-card img,
+.edit-preview,
+.lightbox-panel img {
+  width: 100%;
+  border-radius: 18px;
+  display: block;
+  object-fit: cover;
+}
+
+.photo-meta {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.6rem;
+  color: #c7d9e2;
+  font-size: 0.92rem;
+}
+
+.edit-layout {
+  grid-template-columns: minmax(260px, 420px) 1fr;
+  align-items: start;
+}
+
+.edit-form {
+  padding: 1rem;
+}
+
+.edit-form label {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.inline-row {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 10, 16, 0.86);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 50;
+}
+
+.lightbox-panel {
+  width: min(1100px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 1rem;
+  background: #06111a;
+  padding: 1rem;
+  border: 1px solid rgba(164, 201, 230, 0.12);
+  border-radius: 28px;
+}
+
+.lightbox-media {
+  position: relative;
+}
+
+.lightbox-copy {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+.lightbox-position {
+  margin: 0;
+  color: #8fcbff;
+  font-size: 0.84rem;
+  letter-spacing: 0.08em;
+}
+
+.lightbox-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.lightbox-dot {
+  min-width: 2.2rem;
+  min-height: 2.2rem;
+  padding: 0.45rem;
+  background: rgba(6, 17, 26, 0.7);
+  color: #dcecf5;
+  border: 1px solid rgba(164, 201, 230, 0.18);
+}
+
+.lightbox-nav {
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.lightbox-dot.active {
+  background: linear-gradient(135deg, #7bd0ff, #d87d4a);
+  color: #08131b;
+}
+
+.error {
+  color: #ff9f9f;
+}
+
+.notice {
+  color: #99f0c3;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(2, 10, 16, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-panel {
+  width: min(640px, 100%);
+  padding: 1.15rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.modal-header,
+.modal-toggle-row,
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h2 {
+  margin: 0.2rem 0 0;
+  font-size: 1.3rem;
+}
+
+.modal-toggle-row {
+  justify-content: flex-start;
+}
+
+.modal-panel label {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.ghost-button,
+.active-toggle {
+  background: rgba(12, 30, 44, 0.68);
+  color: #dcecf5;
+  border: 1px solid rgba(164, 201, 230, 0.12);
+}
+
+.active-toggle {
+  background: linear-gradient(135deg, #7bd0ff, #d87d4a);
+  color: #08131b;
+}
+
+.ghost-button:hover,
+.active-toggle:hover {
+  opacity: 0.92;
+}
+
+@media (max-width: 900px) {
+  .edit-layout,
+  .admin-toolbar,
+  .lightbox-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .floating-copy {
+    top: 4.25rem;
+    left: 0.85rem;
+    width: min(320px, calc(100vw - 1.7rem));
+    padding: 0.9rem 0.95rem;
+  }
+
+  .floating-panel {
+    top: 4.15rem;
+    left: 0.85rem;
+    width: min(280px, calc(100vw - 1.7rem));
+    padding: 0.75rem 0.8rem;
+  }
+
+  .globe-shadow-overlay::before {
+    width: max(170vw, 170vh);
+    height: max(170vw, 170vh);
+  }
+
+  .panel-toggle {
+    min-width: 64px;
+    padding: 0.4rem 0.68rem;
+  }
+
+  .lightbox-nav {
+    font-size: 0.72rem;
+  }
+
+  .lightbox-dot {
+    min-width: 2rem;
+    min-height: 2rem;
+  }
+
+  .modal-header,
+  .modal-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

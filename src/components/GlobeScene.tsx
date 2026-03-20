@@ -62,6 +62,10 @@ const CITY_LABELS: CityLabel[] = [
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const THUMBNAIL_SIZE = 58;
 const THUMBNAIL_MIN_SPACING = THUMBNAIL_SIZE / 2;
+const MIN_CAMERA_DISTANCE = 1.33;
+const MAX_CAMERA_DISTANCE = 9;
+const ITEM_MODE_DISTANCE = 4.7;
+const INITIAL_CAMERA_DISTANCE = 4.7;
 
 function latLngToVector3(latitude: number, longitude: number, radius = 1.03) {
   const phi = (90 - latitude) * (Math.PI / 180);
@@ -260,6 +264,26 @@ function makeEarthTextures(tier: DeviceTier) {
   return { texture, heightMap };
 }
 
+function GlobeMetricsReporter({
+  onEarthPixelDiameterChange
+}: {
+  onEarthPixelDiameterChange?: (diameter: number) => void;
+}) {
+  const { camera, size } = useThree();
+
+  useFrame(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) {
+      return;
+    }
+    const distance = camera.position.length();
+    const focalLength = (size.height / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const diameter = (2 * focalLength) / distance;
+    onEarthPixelDiameterChange?.(diameter);
+  });
+
+  return null;
+}
+
 function GlobeShell({
   tier,
   cameraDistance,
@@ -290,9 +314,11 @@ function GlobeShell({
       if (focusRotationRef.current !== null) {
         groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, focusRotationRef.current, 4.2, delta);
       } else {
-        const minDistance = 1.33;
-        const maxDistance = 5.4;
-        const zoomProgress = THREE.MathUtils.clamp((maxDistance - cameraDistance) / (maxDistance - minDistance), 0, 1);
+        const zoomProgress = THREE.MathUtils.clamp(
+          (MAX_CAMERA_DISTANCE - cameraDistance) / (MAX_CAMERA_DISTANCE - MIN_CAMERA_DISTANCE),
+          0,
+          1
+        );
         const spinFactor = THREE.MathUtils.lerp(1, 0.08, zoomProgress);
         groupRef.current.rotation.y += delta * 0.05 * spinFactor;
       }
@@ -479,6 +505,8 @@ export function GlobeScene({
   items,
   focus,
   onModeChange,
+  onCameraDistanceChange,
+  onEarthPixelDiameterChange,
   onSelect
 }: {
   tier: DeviceTier;
@@ -486,40 +514,56 @@ export function GlobeScene({
   items: ClusterItem[] | PhotoItem[];
   focus?: { latitude: number | null; longitude: number | null } | null;
   onModeChange: (mode: "cluster" | "items") => void;
+  onCameraDistanceChange?: (distance: number) => void;
+  onEarthPixelDiameterChange?: (diameter: number) => void;
   onSelect: (id: string) => void;
 }) {
   const hoverEnabled = tier !== "mobile";
-  const [cameraDistance, setCameraDistance] = useState(tier === "mobile" ? 3.8 : 3.2);
+  const initialDistance = INITIAL_CAMERA_DISTANCE;
+  const [cameraDistance, setCameraDistance] = useState(initialDistance);
   const globeRotationRef = useRef(0);
+
+  useEffect(() => {
+    setCameraDistance(initialDistance);
+  }, [initialDistance]);
+
+  function syncDistance(distance: number) {
+    setCameraDistance(distance);
+    const nextMode = distance <= ITEM_MODE_DISTANCE ? "items" : "cluster";
+    if (nextMode !== mode) {
+      onModeChange(nextMode);
+    }
+  }
+
+  useEffect(() => {
+    onCameraDistanceChange?.(cameraDistance);
+  }, [cameraDistance, onCameraDistanceChange]);
+
   return (
     <Canvas dpr={tier === "desktop" ? [1, 2] : [1, 1.4]} gl={{ antialias: tier === "desktop", alpha: true }}>
       <ambientLight intensity={1.35} />
       <directionalLight position={[4, 2, 3]} intensity={1.25} />
-      <PerspectiveCamera makeDefault position={[0, 0, tier === "mobile" ? 3.8 : 3.2]} fov={45} />
+      <PerspectiveCamera makeDefault position={[0, 0, initialDistance]} fov={45} />
+      <GlobeMetricsReporter onEarthPixelDiameterChange={onEarthPixelDiameterChange} />
       <OrbitControls
         enablePan={false}
         enableDamping
-        dampingFactor={0.08}
-        minDistance={1.33}
-        maxDistance={5.4}
+        dampingFactor={0.14}
+        minDistance={MIN_CAMERA_DISTANCE}
+        maxDistance={MAX_CAMERA_DISTANCE}
         minPolarAngle={THREE.MathUtils.degToRad(30)}
         maxPolarAngle={THREE.MathUtils.degToRad(150)}
         target={[0, 0, 0]}
         rotateSpeed={tier === "mobile" ? 0.65 : 0.9}
-        zoomSpeed={tier === "mobile" ? 0.8 : 1}
+        zoomSpeed={tier === "mobile" ? 0.65 : 0.8}
         onChange={(event) => {
           if (!event) {
             return;
           }
-          const distance = event.target.object.position.length();
-          setCameraDistance(distance);
-          const nextMode = distance <= 3.2 ? "items" : "cluster";
-          if (nextMode !== mode) {
-            onModeChange(nextMode);
-          }
+          syncDistance(event.target.object.position.length());
         }}
       />
-      <fog attach="fog" args={["#8f9398", 3.8, 6.8]} />
+      <fog attach="fog" args={["#8f9398", 6.5, 11]} />
       <GlobeShell tier={tier} cameraDistance={cameraDistance} rotationRef={globeRotationRef} focus={focus}>
         <CityLabels cameraDistance={cameraDistance} />
         {mode === "cluster"

@@ -59,15 +59,28 @@ function buildClusters(photos: PhotoRecord[], deviceTier: string) {
   return Array.from(groups.values());
 }
 
+function dedupePhotosByExactCoordinates(photos: PhotoRecord[]) {
+  const groups = new Map<string, PhotoRecord>();
+  for (const photo of photos) {
+    const key = `${photo.latitude}:${photo.longitude}`;
+    if (!groups.has(key)) {
+      groups.set(key, photo);
+    }
+  }
+  return Array.from(groups.values());
+}
+
 function visibleItems(photos: PhotoRecord[], deviceTier: string) {
   const max = deviceTier === "mobile" ? 18 : deviceTier === "low" ? 28 : 42;
-  return photos.slice(0, max).map((photo) => ({
+  return dedupePhotosByExactCoordinates(photos)
+    .slice(0, max)
+    .map((photo) => ({
     id: photo.id,
     latitude: photo.latitude,
     longitude: photo.longitude,
     thumbnailUrl: photo.thumbnailUrl,
     title: photo.title
-  }));
+    }));
 }
 
 function sortPublicPhotos(photos: PhotoRecord[]) {

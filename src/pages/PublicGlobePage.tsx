@@ -28,10 +28,28 @@ export function PublicGlobePage() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [error, setError] = useState("");
   const [panelOpen, setPanelOpen] = useState(tier !== "mobile");
+  const [cameraDistance, setCameraDistance] = useState(4.7);
+  const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+
+  const baseDistance = 4.7;
+  const zoomFactor = baseDistance / cameraDistance;
 
   useEffect(() => {
     setPanelOpen(tier !== "mobile");
   }, [tier]);
+
+  useEffect(() => {
+    setCameraDistance(baseDistance);
+  }, [baseDistance]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   useEffect(() => {
     api
@@ -91,10 +109,20 @@ export function PublicGlobePage() {
             items={items as never[]}
             focus={currentPhoto ? { latitude: currentPhoto.latitude, longitude: currentPhoto.longitude } : null}
             onModeChange={setMode}
+            onCameraDistanceChange={setCameraDistance}
+            onEarthPixelDiameterChange={setEarthPixelDiameter}
             onSelect={openPhoto}
           />
         </div>
       </section>
+      <div className="globe-debug-panel" aria-live="polite">
+        <span>Zoom x{zoomFactor.toFixed(2)}</span>
+        <span>Distance {cameraDistance.toFixed(2)}</span>
+        <span>Earth {earthPixelDiameter.toFixed(0)}px</span>
+        <span>
+          Viewport {viewport.width} x {viewport.height}
+        </span>
+      </div>
       {selected && currentPhoto ? (
         <div className="lightbox" onClick={closeLightbox}>
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>

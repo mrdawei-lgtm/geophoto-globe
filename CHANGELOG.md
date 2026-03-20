@@ -2,6 +2,23 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.2 - 2026-03-21
+
+### Added
+
+- Added a temporary public globe debug panel showing zoom factor, camera distance, earth pixel diameter, and viewport size
+- Added live globe metric reporting from the Three.js scene back to the public page for debugging
+- Added a project roadmap document in `roadmap.md` for the planned WeChat mini-program admin flow
+
+### Changed
+
+- Changed public thumbnail rendering so photos with exactly identical GPS coordinates now collapse to a single representative thumbnail on the globe
+- Changed the public globe thumbnail/cluster switch distance from `3.2` to `4.7`
+- Changed the initial public globe camera distance to `4.7`
+- Changed the maximum public globe camera distance from `5.4` to `9`
+- Changed public globe zoom interaction to a softer damped feel by increasing camera damping and reducing zoom speed
+- Changed public fog tuning to `near = 6.5` and `far = 11` so the globe keeps visible texture at farther zoom levels
+
 ## 0.1.1 - 2026-03-19
 
 ### Added

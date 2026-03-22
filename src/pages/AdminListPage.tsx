@@ -1,11 +1,36 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, PhotoListItem } from "../lib/api";
+import { api, ImportJob, PhotoListItem } from "../lib/api";
 
 type GeoFilter = "all" | "missing" | "attached";
 type VisibilityFilter = "all" | "hidden" | "visible";
 type DeletedFilter = "all" | "deleted" | "active";
 type GpsMode = "coordinates" | "address";
+type UploadItemStatus = "queued" | "uploading" | "processing" | "success" | "failed";
+
+type UploadQueueItem = {
+  localId: string;
+  file: File;
+  filename: string;
+  status: UploadItemStatus;
+  progress: number;
+  error: string;
+  jobItemId: string | null;
+  photoId: string | null;
+};
+
+function createUploadQueueItem(file: File): UploadQueueItem {
+  return {
+    localId: crypto.randomUUID(),
+    file,
+    filename: file.name,
+    status: "queued",
+    progress: 0,
+    error: "",
+    jobItemId: null,
+    photoId: null
+  };
+}
 
 export function AdminListPage() {
   const [items, setItems] = useState<PhotoListItem[]>([]);
@@ -23,6 +48,9 @@ export function AdminListPage() {
   const [addressInput, setAddressInput] = useState("");
   const [locationLabelInput, setLocationLabelInput] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadQueueItem[]>([]);
+  const [uploadJob, setUploadJob] = useState<ImportJob | null>(null);
+  const [uploadRunning, setUploadRunning] = useState(false);
 
   async function load() {
     try {
@@ -59,11 +87,25 @@ export function AdminListPage() {
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
+  const uploadSummary = useMemo(() => {
+    const total = uploadItems.length;
+    const queued = uploadItems.filter((item) => item.status === "queued").length;
+    const uploading = uploadItems.filter((item) => item.status === "uploading").length;
+    const processing = uploadItems.filter((item) => item.status === "processing").length;
+    const success = uploadItems.filter((item) => item.status === "success").length;
+    const failed = uploadItems.filter((item) => item.status === "failed").length;
+    return { total, queued, uploading, processing, success, failed };
+  }, [uploadItems]);
+  const queuedUploadCount = useMemo(
+    () => uploadItems.filter((item) => item.status === "queued").length,
+    [uploadItems]
+  );
+
   function toggle(id: string) {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
-  async function doBatch(action: "visible" | "hidden" | "delete" | "restore" | "gps") {
+  async function doBatch(action: "visible" | "hidden" | "delete" | "restore" | "purge" | "gps") {
     if (!selected.length) {
       return;
     }
@@ -78,6 +120,17 @@ export function AdminListPage() {
       } else if (action === "restore") {
         await api.batchRestore(selected);
         setNotice(`${selected.length} photo(s) restored.`);
+      } else if (action === "purge") {
+        const confirmed = window.confirm(
+          `Permanently delete ${selected.length} selected photo(s)? This will remove database records and all image files. This cannot be undone.`
+        );
+        if (!confirmed) {
+          return;
+        }
+        const result = await api.batchPurge(selected);
+        setNotice(
+          `Purge finished: ${result.successCount} purged, ${result.failedCount} failed, ${result.skippedCount} skipped.`
+        );
       } else {
         setGpsDialogOpen(true);
         return;
@@ -89,20 +142,140 @@ export function AdminListPage() {
     }
   }
 
-  async function onImport(event: ChangeEvent<HTMLInputElement>) {
+  function updateUploadItem(localId: string, patch: Partial<UploadQueueItem>) {
+    setUploadItems((current) => current.map((item) => (item.localId === localId ? { ...item, ...patch } : item)));
+  }
+
+  function onSelectFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
     if (!files?.length) {
       return;
     }
-    const formData = new FormData();
-    Array.from(files).forEach((file) => formData.append("photos", file));
-    try {
+    const nextItems = Array.from(files).map(createUploadQueueItem);
+    const shouldReplaceExisting = !uploadRunning && uploadItems.every((item) => item.status !== "queued");
+    setUploadItems((current) =>
+      shouldReplaceExisting ? nextItems : [...current, ...nextItems]
+    );
+    if (shouldReplaceExisting) {
+      setUploadJob(null);
+      setNotice("");
       setError("");
-      await api.importPhotos(formData);
-      setNotice(`${files.length} photo(s) imported.`);
+    }
+    event.target.value = "";
+  }
+
+  function removeUploadItem(localId: string) {
+    if (uploadRunning) {
+      return;
+    }
+    setUploadItems((current) => current.filter((item) => item.localId !== localId));
+  }
+
+  async function startUploadBatch() {
+    if (uploadRunning || queuedUploadCount === 0) {
+      return;
+    }
+
+    const pendingItems = uploadItems
+      .filter((item) => item.status === "queued")
+      .map((item) => ({
+      localId: item.localId,
+      file: item.file,
+      filename: item.filename
+      }));
+
+    try {
+      setUploadRunning(true);
+      setError("");
+      setNotice("");
+
+      const job = await api.createImportJob(pendingItems.map((item) => item.filename));
+      setUploadJob(job);
+      setUploadItems((current) => {
+        let queuedIndex = 0;
+        return current.map((item) => {
+          if (item.status !== "queued") {
+            return item;
+          }
+          const jobItem = job.items[queuedIndex];
+          queuedIndex += 1;
+          return {
+            ...item,
+            status: "queued",
+            progress: 0,
+            error: "",
+            photoId: null,
+            jobItemId: jobItem?.id ?? null
+          };
+        });
+      });
+
+      let nextIndex = 0;
+      const workerCount = Math.min(2, pendingItems.length);
+
+      async function worker() {
+        while (nextIndex < pendingItems.length) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+          const currentItem = pendingItems[currentIndex];
+          const jobItem = job.items[currentIndex];
+          if (!jobItem) {
+            updateUploadItem(currentItem.localId, {
+              status: "failed",
+              error: "Missing import job item"
+            });
+            continue;
+          }
+
+          updateUploadItem(currentItem.localId, {
+            status: "uploading",
+            progress: 0,
+            error: "",
+            jobItemId: jobItem.id
+          });
+
+          try {
+            const response = await api.uploadImportJobFile(job.id, jobItem.id, currentItem.file, {
+              onUploadProgress: (progress) => {
+                updateUploadItem(currentItem.localId, {
+                  status: progress >= 1 ? "processing" : "uploading",
+                  progress
+                });
+              },
+              onUploadComplete: () => {
+                updateUploadItem(currentItem.localId, { status: "processing", progress: 1 });
+              }
+            });
+
+            setUploadJob(response.job);
+            updateUploadItem(currentItem.localId, {
+              status: response.result.status === "success" ? "success" : "failed",
+              progress: 1,
+              error: response.result.error || response.item?.errorMessage || "",
+              photoId: response.item?.photoId || null
+            });
+          } catch (err) {
+            updateUploadItem(currentItem.localId, {
+              status: "failed",
+              error: err instanceof Error ? err.message : "Upload failed"
+            });
+            const refreshedJob = await api.getImportJob(job.id).catch(() => null);
+            if (refreshedJob) {
+              setUploadJob(refreshedJob);
+            }
+          }
+        }
+      }
+
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      const finalJob = await api.getImportJob(job.id);
+      setUploadJob(finalJob);
+      setNotice(finalJob.summaryMessage || `Upload batch finished: ${finalJob.successCount} success, ${finalJob.failedCount} failed.`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : "Failed to start upload batch");
+    } finally {
+      setUploadRunning(false);
     }
   }
 
@@ -165,9 +338,6 @@ export function AdminListPage() {
       <section className="admin-toolbar panel">
         <div className="toolbar-group">
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, text or place" />
-          <button onClick={() => void load()}>Search</button>
-        </div>
-        <div className="toolbar-group">
           <select value={geoFilter} onChange={(event) => setGeoFilter(event.target.value as GeoFilter)}>
             <option value="all">All GPS</option>
             <option value="missing">Missing GPS</option>
@@ -186,10 +356,9 @@ export function AdminListPage() {
             <option value="active">Active only</option>
             <option value="deleted">Deleted only</option>
           </select>
-          <label className="file-button">
-            Import photos
-            <input type="file" multiple accept="image/*" onChange={onImport} />
-          </label>
+          <button onClick={() => void load()}>Search</button>
+        </div>
+        <div className="toolbar-group">
           <button onClick={() => void doBatch("visible")}>Show</button>
           <button onClick={() => void doBatch("hidden")}>Hide</button>
           <button onClick={() => void doBatch("gps")}>Set GPS</button>
@@ -197,8 +366,61 @@ export function AdminListPage() {
             Delete
           </button>
           <button onClick={() => void doBatch("restore")}>Restore</button>
+          <button onClick={() => void doBatch("purge")} className="danger">
+            Purge
+          </button>
         </div>
       </section>
+
+      <section className="panel upload-panel">
+        <div className="upload-panel-header">
+          <div>
+            <p className="eyebrow">Batch Upload</p>
+            <h2>Import multiple photos</h2>
+          </div>
+          <div className="upload-panel-actions">
+            <label className="file-button">
+              Select photos
+              <input type="file" multiple accept="image/*" onChange={onSelectFiles} disabled={uploadRunning} />
+            </label>
+            <button type="button" onClick={() => void startUploadBatch()} disabled={queuedUploadCount === 0 || uploadRunning}>
+              {uploadRunning ? "Uploading..." : "Start upload"}
+            </button>
+          </div>
+        </div>
+        <div className="upload-summary">
+          <span>Total {uploadSummary.total}</span>
+          <span>Queued {uploadSummary.queued}</span>
+          <span>Uploading {uploadSummary.uploading}</span>
+          <span>Processing {uploadSummary.processing}</span>
+          <span>Success {uploadSummary.success}</span>
+          <span>Failed {uploadSummary.failed}</span>
+        </div>
+        {uploadJob ? <p className="upload-job-note">Job {uploadJob.id} · {uploadJob.status} · {uploadJob.summaryMessage || "Waiting to start."}</p> : null}
+        {uploadItems.length ? (
+          <div className="upload-list">
+            {uploadItems.map((item) => (
+              <div key={item.localId} className={`upload-row ${item.status}`}>
+                <div className="upload-row-main">
+                  <strong>{item.filename}</strong>
+                  <span>{item.status === "uploading" ? `Uploading ${Math.round(item.progress * 100)}%` : item.status}</span>
+                </div>
+                <div className="upload-row-meta">
+                  {item.error ? <span className="error">{item.error}</span> : null}
+                  {!uploadRunning && item.status === "queued" ? (
+                    <button type="button" className="ghost-button" onClick={() => removeUploadItem(item.localId)}>
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="upload-empty">Select one or more photos to create a batch import job.</p>
+        )}
+      </section>
+
       {notice ? <p className="notice panel">{notice}</p> : null}
       {error ? <p className="error panel">{error}</p> : null}
       <section className="cms-grid">

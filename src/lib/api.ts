@@ -23,6 +23,35 @@ export type PublicPhotoItem = {
   longitude: number | null;
 };
 
+export type ImportJobStatus = "pending" | "running" | "completed" | "partial" | "failed";
+export type ImportJobItemStatus = "queued" | "uploading" | "processing" | "success" | "failed";
+
+export type ImportJobItem = {
+  id: string;
+  jobId: string;
+  originalFilename: string;
+  status: ImportJobItemStatus;
+  photoId: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ImportJob = {
+  id: string;
+  status: ImportJobStatus;
+  totalCount: number;
+  processedCount: number;
+  successCount: number;
+  failedCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summaryMessage: string;
+  items: ImportJobItem[];
+};
+
 async function request<T>(url: string, init?: RequestInit, auth = false): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has("Content-Type") && !(init?.body instanceof FormData)) {
@@ -62,6 +91,66 @@ export const api = {
   updatePhoto(id: string, payload: Record<string, unknown>) {
     return request(`/api/admin/photos/${id}`, { method: "PATCH", body: JSON.stringify(payload) }, true);
   },
+  createImportJob(filenames: string[]) {
+    return request<ImportJob>(
+      "/api/admin/import-jobs",
+      { method: "POST", body: JSON.stringify({ filenames }) },
+      true
+    );
+  },
+  getImportJobs() {
+    return request<{ items: ImportJob[] }>("/api/admin/import-jobs", undefined, true);
+  },
+  getImportJob(id: string) {
+    return request<ImportJob>(`/api/admin/import-jobs/${id}`, undefined, true);
+  },
+  uploadImportJobFile(
+    jobId: string,
+    itemId: string,
+    file: File,
+    options?: {
+      onUploadProgress?: (progress: number) => void;
+      onUploadComplete?: () => void;
+    }
+  ) {
+    return new Promise<{
+      item: ImportJobItem;
+      job: ImportJob;
+      result: { id?: string; hasGeo?: boolean; filename: string; status: "success" | "failed"; error?: string };
+    }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/admin/import-jobs/${jobId}/files`);
+      const token = localStorage.getItem("adminToken");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) {
+          return;
+        }
+        options?.onUploadProgress?.(event.loaded / event.total);
+        if (event.loaded >= event.total) {
+          options?.onUploadComplete?.();
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Upload failed"));
+      xhr.onload = () => {
+        const payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(payload?.error || "Upload failed"));
+          return;
+        }
+        resolve(payload);
+      };
+
+      const formData = new FormData();
+      formData.append("itemId", itemId);
+      formData.append("photo", file);
+      xhr.send(formData);
+    });
+  },
   importPhotos(formData: FormData) {
     return request("/api/admin/photos/import", { method: "POST", body: formData }, true);
   },
@@ -77,6 +166,14 @@ export const api = {
   },
   batchRestore(ids: string[]) {
     return request("/api/admin/photos/batch/restore", { method: "POST", body: JSON.stringify({ ids }) }, true);
+  },
+  batchPurge(ids: string[]) {
+    return request<{
+      items: Array<{ id: string; status: "purged" | "failed" | "skipped"; error?: string }>;
+      successCount: number;
+      failedCount: number;
+      skippedCount: number;
+    }>("/api/admin/photos/batch/purge", { method: "POST", body: JSON.stringify({ ids }) }, true);
   },
   batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string) {
     return request(

@@ -87,6 +87,7 @@
 
 - `Node.js`
 - `Express`
+- `SQLite`
 - `multer` 处理上传
 - `sharp` 生成缩略图和展示图
 - `exifr` 读取 EXIF
@@ -94,9 +95,13 @@
 
 ### 数据存储
 
-当前实现使用本地 JSON 文件保存元数据：
+当前实现使用本地 SQLite 保存照片元数据和导入任务：
 
-- `data/photos.json`
+- `data/geophoto-globe.sqlite`
+
+兼容首版历史数据：
+
+- 如果存在旧的 `data/photos.json`，服务启动或执行数据库引导脚本时会在数据库为空时自动执行一次性导入
 
 图片资源分目录保存：
 
@@ -110,6 +115,7 @@
 - 原图保留不改动
 - 系统只修改托管副本
 - 缩略图和展示图独立生成
+- 元数据和导入任务统一落到 SQLite，便于后续同时服务 Web CMS 和小程序后台
 
 ### 地理编码服务
 
@@ -198,14 +204,18 @@
 
 管理员上传照片后，服务端按以下流程处理：
 
-1. 接收上传文件
-2. 保存原始文件到 `storage/originals`
-3. 复制一份托管副本到 `storage/managed`
-4. 读取 EXIF 信息
-5. 提取拍摄时间、GPS、海拔等元数据
-6. 生成缩略图到 `storage/thumbs`
-7. 生成展示图到 `storage/display`
-8. 写入 `data/photos.json`
+1. 管理端先创建一个批量导入 job
+2. 前端把选中的文件放入本地上传队列
+3. 前端按小并发逐个把文件上传到该 job
+4. 每个文件进入独立的导入处理流程：
+   - 保存原始文件到 `storage/originals`
+   - 复制一份托管副本到 `storage/managed`
+   - 读取 EXIF 信息
+   - 提取拍摄时间、GPS、海拔等元数据
+   - 生成缩略图到 `storage/thumbs`
+   - 生成展示图到 `storage/display`
+   - 将照片元数据写入 SQLite
+5. 服务端持续更新 job 和 job item 的状态、成功数、失败数和错误信息
 
 如果图片没有 GPS：
 
@@ -260,7 +270,8 @@
 ### 当前版本的简化点
 
 - 只支持单管理员
-- 使用 JSON 存储，不是数据库
+- 导入任务当前仍在服务进程内顺序执行，不是独立后台队列
+- 前端上传队列当前固定并发为 `2`
 - 批量 GPS 用弹窗输入，尚未做完整工作流界面
 - 还没有回收站独立页面
 - 还没有地理编码缓存与限流队列
@@ -279,10 +290,15 @@
 - `GET /api/admin/photos`
 - `GET /api/admin/photos/:id`
 - `PATCH /api/admin/photos/:id`
+- `POST /api/admin/import-jobs`
+- `POST /api/admin/import-jobs/:id/files`
 - `POST /api/admin/photos/import`
+- `GET /api/admin/import-jobs`
+- `GET /api/admin/import-jobs/:id`
 - `POST /api/admin/photos/batch/visibility`
 - `POST /api/admin/photos/batch/delete`
 - `POST /api/admin/photos/batch/restore`
+- `POST /api/admin/photos/batch/purge`
 - `POST /api/admin/photos/batch/gps`
 - `GET /api/admin/geocode/search?q=...`
 
@@ -300,6 +316,7 @@
 ```bash
 nvm use
 cp .env.example .env
+npm run db:bootstrap
 ```
 
 仓库已附带默认 `.env`，不需要改动也能本地启动；如果你要改管理员密码或端口，再编辑 `.env`。
@@ -308,11 +325,13 @@ cp .env.example .env
 
 ```bash
 ./scripts/with-local-node.sh npm install
+./scripts/with-local-node.sh npm run db:bootstrap
 ./scripts/with-local-node.sh npm run dev
 ```
 
 ```bash
 npm install
+npm run db:bootstrap
 npm run dev
 ```
 
@@ -362,14 +381,49 @@ npm run dev
 
 - `ADMIN_PASSWORD`
 - `PORT`
+- `DATABASE_PATH`
+
+### SQLite 初始化与历史 JSON 迁移
+
+- 默认数据库文件是 `data/geophoto-globe.sqlite`
+- 执行 `npm run db:bootstrap` 会：
+  - 创建 SQLite 文件和表结构
+  - 如果数据库当前没有照片记录，并且存在旧的 `data/photos.json`，则自动导入旧数据
+- 服务启动时也会执行相同的数据库引导逻辑，因此本地开发不需要手动跑迁移系统
+
+### 导入任务机制
+
+- 推荐导入流程：
+  - `POST /api/admin/import-jobs` 创建批量任务
+  - `POST /api/admin/import-jobs/:id/files` 将单个文件上传并处理到该任务下
+  - `GET /api/admin/import-jobs/:id` 查询任务和每个文件的状态
+- 当前管理端使用本地上传队列，固定并发 `2`
+- 每个文件拥有独立状态：
+  - `queued`
+  - `uploading`
+  - `processing`
+  - `success`
+  - `failed`
+- 当前导入仍然在当前 Node 进程内执行，但会把进度、成功数、失败数和错误信息写入 SQLite
+- 可通过以下接口查看导入状态：
+  - `GET /api/admin/import-jobs`
+  - `GET /api/admin/import-jobs/:id`
+- 为兼容旧调用，`POST /api/admin/photos/import` 仍保留，并继续返回：
+  - `jobId`
+  - `job`
+  - `results`
+- 每个上传请求当前限制为单张图片、最大 `50MB`
+- 如果服务在导入中重启，处于 `uploading` / `processing` 的文件会在下一次启动后被标记为失败，错误信息为 `Server restarted during import`
 
 ## 当前默认设置
 
 - 默认管理员密码：`admin123`
 - 默认服务端端口：`8787`
 - 默认前端端口：`5173`
+- 默认 SQLite 路径：`data/geophoto-globe.sqlite`
 - 默认地理编码服务：`Nominatim`
 - 默认删除方式：软删除
+- 默认永久删除方式：管理员手动批量 purge
 - 默认图片状态：`visible`
 - 默认无 GPS 图片：导入但不在前台显示
 
@@ -391,6 +445,8 @@ npm run dev
 
 - 可登录
 - 可导入照片
+- 可按 job 方式分批导入多张照片
+- 可看到每张照片的上传 / 处理状态与最终错误
 - 可显示缩略图列表
 - 可进入编辑页
 - 可编辑标题和介绍
@@ -425,10 +481,14 @@ npm run dev
 - 批量软删除 / 恢复
 - 批量 GPS 设置
 - 本地开发环境基础配置
+- SQLite 元数据存储
+- 轻量级导入任务进度与失败记录
+- 管理端批量上传队列与逐文件导入
+- repository / service / db 分层
 
 当前仓库状态补充说明：
 
-- `data/photos.json` 里已有一批真实导入数据，不只有 5 张样例图
+- 如果存在 `data/photos.json`，系统会在 SQLite 为空时自动做一次性导入
 - 历史数据中的绝对文件路径已在服务端做兼容，便于跨机器本地调试
 - 还没有自动化测试框架，当前只提供构建级 `npm run verify` 冒烟校验
 
@@ -439,6 +499,7 @@ npm run dev
 1. 前台和 CMS 做动态拆包，减小前端首包体积
 2. 给地理编码增加缓存、限流和失败重试
 3. 把批量 GPS 从 `prompt` 交互升级为正式表单弹层
-4. 把 JSON 存储升级到 SQLite 或 PostgreSQL
-5. 增加无 WebGL 时的 2D 降级浏览页
-6. 增加批量导入进度、错误报告和任务日志
+4. 增加无 WebGL 时的 2D 降级浏览页
+5. 将当前进程内导入任务升级为可替换的后台队列执行器
+6. 给失败文件增加正式重试按钮和更细的导入历史页面
+7. 继续抽离共享后台能力，为未来小程序管理端复用服务层

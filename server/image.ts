@@ -4,12 +4,9 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import exifr from "exifr";
 import { ExifTool } from "exiftool-vendored";
+import { appRoot, storageRoot, uploadsRoot } from "./config.js";
 
 const exiftool = new ExifTool();
-
-export const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-export const storageRoot = path.join(appRoot, "storage");
-export const uploadsRoot = path.join(appRoot, "uploads");
 
 export type ParsedMetadata = {
   capturedAt: string | null;
@@ -25,7 +22,7 @@ async function ensureDirs() {
     fs.mkdir(path.join(storageRoot, "managed"), { recursive: true }).catch(() => undefined),
     fs.mkdir(path.join(storageRoot, "thumbs"), { recursive: true }).catch(() => undefined),
     fs.mkdir(path.join(storageRoot, "display"), { recursive: true }).catch(() => undefined),
-    fs.mkdir(path.join(appRoot, "uploads"), { recursive: true }).catch(() => undefined)
+    fs.mkdir(uploadsRoot, { recursive: true }).catch(() => undefined)
   ]);
 }
 

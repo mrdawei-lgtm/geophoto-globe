@@ -296,9 +296,101 @@ select {
 .inline-row,
 .grid-two,
 .cms-grid,
-.edit-layout {
+.edit-layout,
+.upload-panel,
+.upload-list {
   display: grid;
   gap: 1rem;
+}
+
+.upload-panel {
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.upload-panel-header,
+.upload-panel-actions,
+.upload-row,
+.upload-row-main,
+.upload-row-meta,
+.upload-summary {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.upload-panel-header,
+.upload-row,
+.upload-row-meta,
+.upload-summary {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.upload-panel-header h2 {
+  margin: 0.1rem 0 0;
+  font-size: 1.2rem;
+}
+
+.upload-panel-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.upload-summary {
+  flex-wrap: wrap;
+  color: #c7d9e2;
+  font-size: 0.9rem;
+}
+
+.upload-job-note,
+.upload-empty {
+  margin: 0;
+  color: #c7d9e2;
+}
+
+.upload-list {
+  gap: 0.65rem;
+}
+
+.upload-row {
+  padding: 0.8rem 0.9rem;
+  background: rgba(1, 12, 18, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+.upload-row-main,
+.upload-row-meta {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.upload-row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.upload-row-main strong {
+  max-width: min(420px, 60vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-row.uploading {
+  border-color: rgba(123, 208, 255, 0.32);
+}
+
+.upload-row.processing {
+  border-color: rgba(216, 125, 74, 0.32);
+}
+
+.upload-row.success {
+  border-color: rgba(153, 240, 195, 0.28);
+}
+
+.upload-row.failed {
+  border-color: rgba(255, 154, 125, 0.36);
 }
 
 .toolbar-group {

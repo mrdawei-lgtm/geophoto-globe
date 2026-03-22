@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "vite",
     "dev:server": "tsx watch server/index.ts",
+    "db:bootstrap": "node --import tsx server/scripts/bootstrap-db.ts",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production node dist-server/server/index.js",
     "verify": "npm run build"

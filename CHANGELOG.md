@@ -2,6 +2,65 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.5 - 2026-03-22
+
+### Changed
+
+- Changed the admin list toolbar so the `GPS`, `visibility`, and `states` filters now sit in the same search control group as the keyword search
+
+### Fixed
+
+- Fixed the admin batch uploader so starting a new batch after a previous batch no longer misassigns import job items to the wrong queued files
+- Fixed upload panel reset behavior so selecting files for a fresh batch clears the previous batch job state more predictably when no queued items remain
+
+## 0.1.4 - 2026-03-21
+
+### Added
+
+- Added permanent purge support for soft-deleted photos through a new admin batch endpoint
+
+### Changed
+
+- Changed admin photo management so deleted items can now be permanently removed from both SQLite and local storage files
+- Changed the admin list toolbar to include a destructive `Purge` action with confirmation before execution
+
+### Improved
+
+- Improved cleanup behavior by tolerating already-missing files during permanent purge while continuing to remove remaining assets and records
+
+## 0.1.3 - 2026-03-21
+
+### Added
+
+- Added SQLite-backed backend bootstrap with a local `db:bootstrap` command
+- Added backend `db`, `repositories`, `services`, and `routes` layers to separate routing from storage and business logic
+- Added SQLite-backed import job and import job item persistence for upload tracking
+- Added new admin import job endpoints for creating a batch job, uploading one file at a time, and querying job status
+- Added a proper batch upload panel in the admin CMS with selected file review, per-file status rows, overall batch progress, and final summary
+- Added frontend queued upload execution with concurrency `2`
+
+### Changed
+
+- Changed photo metadata storage from direct JSON access in routes to SQLite as the primary source of truth
+- Changed admin multi-photo import from one fragile all-files request to a job-based one-file-per-request sequence
+- Changed import processing so progress, successes, failures, and per-file errors are recorded formally in the backend
+- Changed import handling to keep processing remaining files even when one file fails
+- Changed backend startup to recover interrupted import items by marking in-flight files as failed after restart
+- Changed README to document SQLite initialization, legacy JSON import, import job lifecycle, and the new upload flow
+
+### Improved
+
+- Improved backend reuse by extracting photo repository and photo service layers suitable for future shared admin backends
+- Improved upload reliability with per-request file size limits, image-type filtering, and clearer upload error responses
+- Improved import debuggability by isolating file failures, keeping counters in sync from persisted job items, and cleaning temporary upload files
+- Improved partial-failure tolerance so one failed file no longer aborts the whole batch
+
+### Fixed
+
+- Fixed import opacity by exposing stable batch/job state instead of only a best-effort bulk import response
+- Fixed a previous gap where import progress and error details were not persisted in a structured way
+- Fixed duplicate-start risk in the admin uploader by disabling repeated batch starts while a queue is active
+
 ## 0.1.2 - 2026-03-21
 
 ### Added

@@ -2,6 +2,17 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.6 - 2026-03-22
+
+### Added
+
+- Added an `MIT` license file for the project
+
+### Changed
+
+- Changed `README.md` into a bilingual Chinese/English format with refreshed setup, development, and deployment guidance
+- Changed repository ignore rules so local runtime files and the project-local Node runtime are no longer tracked in git
+
 ## 0.1.5 - 2026-03-22
 
 ### Changed

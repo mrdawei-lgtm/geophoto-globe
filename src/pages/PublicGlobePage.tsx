@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GlobeScene } from "../components/GlobeScene";
 import { api } from "../lib/api";
 import { useDeviceTier } from "../lib/device";
@@ -15,10 +15,54 @@ type PublicPhoto = {
 };
 
 type PublicPhotoGroup = PublicPhoto & {
+  geoPrimaryLabel: string;
   groupItems: PublicPhoto[];
   groupIndex: number;
   groupCount: number;
 };
+
+function formatGeoPrimaryLabel(label: string) {
+  return label.trim() || "Location unavailable";
+}
+
+function formatCapturedDate(value: string | null) {
+  if (!value) {
+    return "Capture date unavailable";
+  }
+
+  return new Date(value).toLocaleDateString();
+}
+
+function buildLightboxImageStyle(imageFillMode: boolean, fillScrollAxis: "x" | "y") {
+  if (!imageFillMode) {
+    return {
+      width: "auto",
+      height: "auto",
+      maxWidth: "100%",
+      maxHeight: "100%",
+      objectFit: "contain" as const,
+      margin: "auto"
+    };
+  }
+
+  if (fillScrollAxis === "x") {
+    return {
+      width: "auto",
+      height: "100%",
+      maxWidth: "none",
+      maxHeight: "none",
+      objectFit: "cover" as const
+    };
+  }
+
+  return {
+    width: "100%",
+    height: "auto",
+    maxWidth: "none",
+    maxHeight: "none",
+    objectFit: "cover" as const
+  };
+}
 
 export function PublicGlobePage() {
   const tier = useDeviceTier();
@@ -30,7 +74,11 @@ export function PublicGlobePage() {
   const [panelOpen, setPanelOpen] = useState(tier !== "mobile");
   const [cameraDistance, setCameraDistance] = useState(4.7);
   const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
+  const [imageFillMode, setImageFillMode] = useState(false);
+  const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const lightboxMediaRef = useRef<HTMLDivElement | null>(null);
+  const lightboxImageRef = useRef<HTMLImageElement | null>(null);
 
   const baseDistance = 4.7;
   const zoomFactor = baseDistance / cameraDistance;
@@ -58,6 +106,28 @@ export function PublicGlobePage() {
       .catch((err: Error) => setError(err.message));
   }, [mode, tier]);
 
+  useEffect(() => {
+    setImageFillMode(false);
+  }, [selected?.id, activeIndex]);
+
+  useEffect(() => {
+    function syncFillScrollAxis() {
+      const frame = lightboxMediaRef.current;
+      const image = lightboxImageRef.current;
+      if (!frame || !image || !image.naturalWidth || !image.naturalHeight) {
+        return;
+      }
+
+      const frameRatio = frame.clientWidth / frame.clientHeight;
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+      setFillScrollAxis(imageRatio >= frameRatio ? "x" : "y");
+    }
+
+    syncFillScrollAxis();
+    window.addEventListener("resize", syncFillScrollAxis);
+    return () => window.removeEventListener("resize", syncFillScrollAxis);
+  }, [selected?.id, activeIndex, imageFillMode]);
+
   async function openPhoto(id: string) {
     try {
       const nextSelected = await api.publicPhoto(id);
@@ -73,6 +143,7 @@ export function PublicGlobePage() {
   function closeLightbox() {
     setSelected(null);
     setActiveIndex(0);
+    setImageFillMode(false);
   }
 
   function goToPhoto(index: number) {
@@ -81,6 +152,18 @@ export function PublicGlobePage() {
     }
     const nextIndex = (index + selected.groupCount) % selected.groupCount;
     setActiveIndex(nextIndex);
+  }
+
+  function handleLightboxImageLoad() {
+    const frame = lightboxMediaRef.current;
+    const image = lightboxImageRef.current;
+    if (!frame || !image || !image.naturalWidth || !image.naturalHeight) {
+      return;
+    }
+
+    const frameRatio = frame.clientWidth / frame.clientHeight;
+    const imageRatio = image.naturalWidth / image.naturalHeight;
+    setFillScrollAxis(imageRatio >= frameRatio ? "x" : "y");
   }
 
   return (
@@ -127,50 +210,56 @@ export function PublicGlobePage() {
         <div className="lightbox" onClick={closeLightbox}>
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
             <div className="lightbox-media">
-              <img src={currentPhoto.imageUrl} alt={currentPhoto.title} />
-            </div>
-            <div className="lightbox-copy">
+              <div
+                ref={lightboxMediaRef}
+                className={`lightbox-media-frame ${imageFillMode ? `fill-mode scroll-${fillScrollAxis}` : "fit-mode"}`}
+              >
+                <img
+                  ref={lightboxImageRef}
+                  src={currentPhoto.imageUrl}
+                  alt={currentPhoto.title}
+                  onLoad={handleLightboxImageLoad}
+                  style={buildLightboxImageStyle(imageFillMode, fillScrollAxis)}
+                />
+              </div>
               {selected.groupCount > 1 ? (
-                <p className="lightbox-position">
-                  {activeIndex + 1} / {selected.groupCount}
-                </p>
-              ) : null}
-              {selected.groupCount > 1 ? (
-                <div className="lightbox-pagination" aria-label="Photo navigation">
+                <>
                   <button
                     type="button"
-                    className="lightbox-dot lightbox-nav"
+                    className="lightbox-nav-button lightbox-nav-prev"
                     onClick={() => goToPhoto(activeIndex - 1)}
                     aria-label="Previous photo"
                   >
                     &#9664;
                   </button>
-                  {selected.groupItems.map((item, index) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`lightbox-dot ${index === activeIndex ? "active" : ""}`}
-                      onClick={() => goToPhoto(index)}
-                      aria-label={`Go to photo ${index + 1}`}
-                      aria-pressed={index === activeIndex}
-                    >
-                      {index + 1}
-                    </button>
-                  ))}
+                  <p className="lightbox-position">
+                    {activeIndex + 1} / {selected.groupCount}
+                  </p>
                   <button
                     type="button"
-                    className="lightbox-dot lightbox-nav"
+                    className="lightbox-nav-button lightbox-nav-next"
                     onClick={() => goToPhoto(activeIndex + 1)}
                     aria-label="Next photo"
                   >
                     &#9654;
                   </button>
-                </div>
+                </>
               ) : null}
-              <h2>{currentPhoto.title}</h2>
+              <button
+                type="button"
+                className="lightbox-zoom-button"
+                onClick={() => setImageFillMode((value) => !value)}
+                aria-pressed={imageFillMode}
+                aria-label={imageFillMode ? "Fit image to frame" : "Fill image frame"}
+              >
+                {imageFillMode ? "Fit" : "Fill"}
+              </button>
+            </div>
+            <div className="lightbox-copy">
+              <p className="lightbox-geo-title">{formatGeoPrimaryLabel(selected.geoPrimaryLabel)}</p>
+              <p className="lightbox-place-name">{currentPhoto.locationLabel || "Location label not set."}</p>
               <p>{currentPhoto.description || "No description yet."}</p>
-              <p>{currentPhoto.locationLabel || "Location label not set."}</p>
-              <p>{currentPhoto.capturedAt ? new Date(currentPhoto.capturedAt).toLocaleString() : "Capture time unavailable"}</p>
+              <p>{formatCapturedDate(currentPhoto.capturedAt)}</p>
             </div>
           </div>
         </div>

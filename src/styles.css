@@ -458,12 +458,11 @@ button.danger {
 }
 
 .photo-card img,
-.edit-preview,
-.lightbox-panel img {
+.edit-preview {
   width: 100%;
   border-radius: 18px;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .photo-meta {
@@ -509,12 +508,14 @@ button.danger {
 }
 
 .lightbox-panel {
-  width: min(1100px, 100%);
-  max-height: 92vh;
-  overflow: auto;
+  width: min(1280px, 100%);
+  height: min(92vh, calc(100vh - 2rem));
+  max-height: min(92vh, calc(100vh - 2rem));
+  overflow: hidden;
   display: grid;
-  grid-template-columns: 1.25fr 0.75fr;
-  gap: 1rem;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.9rem;
   background: #06111a;
   padding: 1rem;
   border: 1px solid rgba(164, 201, 230, 0.12);
@@ -523,45 +524,150 @@ button.danger {
 
 .lightbox-media {
   position: relative;
+  min-height: 0;
+  height: auto;
+  display: grid;
+  place-items: center;
+  padding: 1rem 4.8rem 1rem;
+  background: linear-gradient(180deg, rgba(9, 24, 35, 0.96), rgba(4, 11, 18, 0.96));
+  border: 1px solid rgba(164, 201, 230, 0.1);
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.lightbox-media-frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+}
+
+.lightbox-media-frame img {
+  display: block;
+  border-radius: 18px;
+}
+
+.lightbox-media-frame.fit-mode {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.lightbox-media-frame.fit-mode img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.lightbox-media-frame.fill-mode {
+  display: grid;
+  place-items: start center;
+}
+
+.lightbox-media-frame.fill-mode.scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.lightbox-media-frame.fill-mode.scroll-y {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.lightbox-media-frame.fill-mode img {
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+}
+
+.lightbox-media-frame.fill-mode.scroll-x img {
+  width: auto;
+  height: 100%;
+}
+
+.lightbox-media-frame.fill-mode.scroll-y img {
+  width: 100%;
+  height: auto;
+}
+
+.lightbox-nav-button {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(164, 201, 230, 0.22);
+  background: rgba(6, 17, 26, 0.74);
+  color: #dcecf5;
+  font-size: 1rem;
+  line-height: 1;
+  z-index: 1;
+}
+
+.lightbox-nav-prev {
+  left: 1rem;
+}
+
+.lightbox-nav-next {
+  right: 1rem;
+}
+
+.lightbox-zoom-button {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1;
+  min-width: 4.4rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(164, 201, 230, 0.22);
+  background: rgba(6, 17, 26, 0.78);
+  color: #dcecf5;
 }
 
 .lightbox-copy {
   display: grid;
   align-content: start;
-  gap: 0.75rem;
+  gap: 0.45rem;
+  padding: 0 0.15rem 0.2rem;
+  overflow: auto;
 }
 
 .lightbox-position {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  transform: none;
   margin: 0;
+  padding: 0.36rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(6, 17, 26, 0.76);
+  border: 1px solid rgba(164, 201, 230, 0.16);
   color: #8fcbff;
   font-size: 0.84rem;
   letter-spacing: 0.08em;
 }
 
-.lightbox-pagination {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem;
+.lightbox-geo-title {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  color: #eef7fc;
 }
 
-.lightbox-dot {
-  min-width: 2.2rem;
-  min-height: 2.2rem;
-  padding: 0.45rem;
-  background: rgba(6, 17, 26, 0.7);
-  color: #dcecf5;
-  border: 1px solid rgba(164, 201, 230, 0.18);
+.lightbox-place-name {
+  font-size: 1rem;
+  color: #8fcbff;
 }
 
-.lightbox-nav {
-  font-size: 0.78rem;
-  line-height: 1;
-}
-
-.lightbox-dot.active {
-  background: linear-gradient(135deg, #7bd0ff, #d87d4a);
-  color: #08131b;
+.lightbox-copy p {
+  margin: 0;
+  color: #c7d9e2;
+  line-height: 1.45;
 }
 
 .error {
@@ -669,13 +775,41 @@ button.danger {
     padding: 0.4rem 0.68rem;
   }
 
-  .lightbox-nav {
-    font-size: 0.72rem;
+  .lightbox-panel {
+    width: min(100%, 760px);
   }
 
-  .lightbox-dot {
-    min-width: 2rem;
-    min-height: 2rem;
+  .lightbox-media {
+    min-height: 0;
+    height: auto;
+    padding: 0.85rem 3.35rem 1rem;
+  }
+
+  .lightbox-nav-button {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 0.82rem;
+  }
+
+  .lightbox-nav-prev {
+    left: 0.7rem;
+  }
+
+  .lightbox-nav-next {
+    right: 0.7rem;
+  }
+
+  .lightbox-position {
+    bottom: 0.75rem;
+    font-size: 0.76rem;
+  }
+
+  .lightbox-zoom-button {
+    right: 0.75rem;
+    bottom: 0.75rem;
+    min-width: 4rem;
+    padding: 0.42rem 0.68rem;
+    font-size: 0.84rem;
   }
 
   .modal-header,

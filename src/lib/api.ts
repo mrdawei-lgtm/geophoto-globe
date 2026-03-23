@@ -197,6 +197,7 @@ export const api = {
   publicPhoto(id: string) {
     return request<
       PublicPhotoItem & {
+        geoPrimaryLabel: string;
         groupItems: PublicPhotoItem[];
         groupIndex: number;
         groupCount: number;

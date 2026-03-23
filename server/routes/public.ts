@@ -2,6 +2,12 @@ import { Router } from "express";
 import type { PhotoRecord } from "../types.js";
 import { PhotoService } from "../services/photoService.js";
 
+type ReverseGeocodeLabels = {
+  geoPrimaryLabel: string;
+};
+
+const reverseGeocodeCache = new Map<string, Promise<ReverseGeocodeLabels>>();
+
 function buildClusters(photos: PhotoRecord[], deviceTier: string) {
   const step = deviceTier === "mobile" ? 18 : deviceTier === "low" ? 14 : 10;
   const groups = new Map<string, { latitude: number; longitude: number; count: number; coverThumbnailUrl: string; id: string }>();
@@ -65,6 +71,62 @@ function serializePublicPhoto(photo: PhotoRecord) {
   };
 }
 
+async function reverseGeocode(latitude: number, longitude: number, fallbackLabel: string): Promise<ReverseGeocodeLabels> {
+  const cacheKey = `${latitude}:${longitude}`;
+  const cached = reverseGeocodeCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+    {
+      headers: {
+        "User-Agent": "GeoPhotoGlobe/0.1 (public reverse geocoding)"
+      }
+    }
+  )
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Reverse geocoding failed with ${response.status}`);
+      }
+      const result = (await response.json()) as {
+        address?: Record<string, string | undefined>;
+      };
+      const address = result.address ?? {};
+      const country = address.country?.trim() || "";
+      const cityLevel =
+        address.city?.trim() ||
+        address.town?.trim() ||
+        address.municipality?.trim() ||
+        address.city_district?.trim() ||
+        address.county?.trim() ||
+        "";
+      const provinceLevel = address.state?.trim() || address.province?.trim() || address.region?.trim() || "";
+      const villageLevel =
+        address.village?.trim() ||
+        address.hamlet?.trim() ||
+        address.neighbourhood?.trim() ||
+        address.suburb?.trim() ||
+        address.quarter?.trim() ||
+        "";
+
+      const segments = cityLevel
+        ? [country, cityLevel]
+        : [country, provinceLevel, villageLevel].filter((value, index, items) => value && items.indexOf(value) === index);
+
+      return {
+        geoPrimaryLabel: segments.join(" ").trim() || fallbackLabel || "Location unavailable"
+      };
+    })
+    .catch(() => ({
+      geoPrimaryLabel: fallbackLabel || "Location unavailable"
+    }));
+
+  reverseGeocodeCache.set(cacheKey, request);
+  return request;
+}
+
 export function createPublicRouter(photoService: PhotoService) {
   const router = Router();
 
@@ -78,7 +140,7 @@ export function createPublicRouter(photoService: PhotoService) {
     });
   });
 
-  router.get("/photos/:id", (req, res) => {
+  router.get("/photos/:id", async (req, res) => {
     const publicPhotos = sortPublicPhotos(photoService.listPublicPhotos());
     const photo = publicPhotos.find((item) => item.id === req.params.id) ?? null;
     if (!photo) {
@@ -89,8 +151,13 @@ export function createPublicRouter(photoService: PhotoService) {
       (item) => item.latitude === photo.latitude && item.longitude === photo.longitude
     );
     const groupIndex = groupItems.findIndex((item) => item.id === photo.id);
+    const labels =
+      photo.latitude !== null && photo.longitude !== null
+        ? await reverseGeocode(photo.latitude, photo.longitude, photo.locationLabel)
+        : { geoPrimaryLabel: photo.locationLabel || "Location unavailable" };
     res.json({
       ...serializePublicPhoto(photo),
+      ...labels,
       groupItems: groupItems.map(serializePublicPhoto),
       groupIndex,
       groupCount: groupItems.length

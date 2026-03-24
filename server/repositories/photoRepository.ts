@@ -1,6 +1,7 @@
 import type { SQLInputValue } from "node:sqlite";
 import { getDb } from "../db/client.js";
 import type { PhotoListFilters, PhotoRecord } from "../types.js";
+import type { DescriptionSource } from "../types.js";
 
 type PhotoRow = {
   id: string;
@@ -10,12 +11,18 @@ type PhotoRow = {
   display_image_url: string;
   title: string;
   description: string;
+  description_source: DescriptionSource;
   captured_at: string | null;
   latitude: number | null;
   longitude: number | null;
   altitude: number | null;
   has_geo: number;
   location_label: string;
+  geo_country_en: string;
+  geo_region_en: string;
+  geo_locality_en: string;
+  geo_summary_en: string;
+  geo_resolved_at: string | null;
   visibility_status: "visible" | "hidden";
   deleted_at: string | null;
   imported_at: string;
@@ -31,12 +38,18 @@ function mapPhotoRow(row: PhotoRow): PhotoRecord {
     displayImageUrl: row.display_image_url,
     title: row.title,
     description: row.description,
+    descriptionSource: row.description_source,
     capturedAt: row.captured_at,
     latitude: row.latitude,
     longitude: row.longitude,
     altitude: row.altitude,
     hasGeo: Boolean(row.has_geo),
     locationLabel: row.location_label,
+    geoCountryEn: row.geo_country_en,
+    geoRegionEn: row.geo_region_en,
+    geoLocalityEn: row.geo_locality_en,
+    geoSummaryEn: row.geo_summary_en,
+    geoResolvedAt: row.geo_resolved_at,
     visibilityStatus: row.visibility_status,
     deletedAt: row.deleted_at,
     importedAt: row.imported_at,
@@ -53,12 +66,18 @@ function mapPhotoParams(record: PhotoRecord) {
     displayImageUrl: record.displayImageUrl,
     title: record.title,
     description: record.description,
+    descriptionSource: record.descriptionSource,
     capturedAt: record.capturedAt,
     latitude: record.latitude,
     longitude: record.longitude,
     altitude: record.altitude,
     hasGeo: record.hasGeo ? 1 : 0,
     locationLabel: record.locationLabel,
+    geoCountryEn: record.geoCountryEn ?? "",
+    geoRegionEn: record.geoRegionEn ?? "",
+    geoLocalityEn: record.geoLocalityEn ?? "",
+    geoSummaryEn: record.geoSummaryEn ?? "",
+    geoResolvedAt: record.geoResolvedAt ?? null,
     visibilityStatus: record.visibilityStatus,
     deletedAt: record.deletedAt,
     importedAt: record.importedAt,
@@ -83,6 +102,14 @@ export class PhotoRepository {
       params.hasGeo = filters.hasGeo ? 1 : 0;
     }
 
+    if (typeof filters.hasLocationLabel === "boolean") {
+      clauses.push(
+        filters.hasLocationLabel
+          ? "TRIM(COALESCE(location_label, '')) <> ''"
+          : "TRIM(COALESCE(location_label, '')) = ''"
+      );
+    }
+
     if (typeof filters.deleted === "boolean") {
       clauses.push(filters.deleted ? "deleted_at IS NOT NULL" : "deleted_at IS NULL");
     }
@@ -105,6 +132,13 @@ export class PhotoRepository {
     return row ? mapPhotoRow(row) : null;
   }
 
+  listByCoordinates(latitude: number, longitude: number) {
+    const rows = this.db
+      .prepare("SELECT * FROM photos WHERE latitude = ? AND longitude = ?")
+      .all(latitude, longitude) as PhotoRow[];
+    return rows.map(mapPhotoRow);
+  }
+
   upsert(record: PhotoRecord) {
     this.db.prepare(`
       INSERT INTO photos (
@@ -115,12 +149,18 @@ export class PhotoRepository {
         display_image_url,
         title,
         description,
+        description_source,
         captured_at,
         latitude,
         longitude,
         altitude,
         has_geo,
         location_label,
+        geo_country_en,
+        geo_region_en,
+        geo_locality_en,
+        geo_summary_en,
+        geo_resolved_at,
         visibility_status,
         deleted_at,
         imported_at,
@@ -133,12 +173,18 @@ export class PhotoRepository {
         @displayImageUrl,
         @title,
         @description,
+        @descriptionSource,
         @capturedAt,
         @latitude,
         @longitude,
         @altitude,
         @hasGeo,
         @locationLabel,
+        @geoCountryEn,
+        @geoRegionEn,
+        @geoLocalityEn,
+        @geoSummaryEn,
+        @geoResolvedAt,
         @visibilityStatus,
         @deletedAt,
         @importedAt,
@@ -151,12 +197,18 @@ export class PhotoRepository {
         display_image_url = excluded.display_image_url,
         title = excluded.title,
         description = excluded.description,
+        description_source = excluded.description_source,
         captured_at = excluded.captured_at,
         latitude = excluded.latitude,
         longitude = excluded.longitude,
         altitude = excluded.altitude,
         has_geo = excluded.has_geo,
         location_label = excluded.location_label,
+        geo_country_en = excluded.geo_country_en,
+        geo_region_en = excluded.geo_region_en,
+        geo_locality_en = excluded.geo_locality_en,
+        geo_summary_en = excluded.geo_summary_en,
+        geo_resolved_at = excluded.geo_resolved_at,
         visibility_status = excluded.visibility_status,
         deleted_at = excluded.deleted_at,
         imported_at = excluded.imported_at,

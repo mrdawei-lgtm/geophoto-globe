@@ -64,7 +64,7 @@ const THUMBNAIL_SIZE = 58;
 const THUMBNAIL_MIN_SPACING = THUMBNAIL_SIZE / 2;
 const MIN_CAMERA_DISTANCE = 1.33;
 const MAX_CAMERA_DISTANCE = 9;
-const ITEM_MODE_DISTANCE = 4.7;
+const ITEM_MODE_DISTANCE = 4.0;
 const INITIAL_CAMERA_DISTANCE = 4.7;
 
 function latLngToVector3(latitude: number, longitude: number, radius = 1.03) {
@@ -289,12 +289,14 @@ function GlobeShell({
   cameraDistance,
   rotationRef,
   focus,
+  motionEnabled,
   children
 }: {
   tier: DeviceTier;
   cameraDistance: number;
   rotationRef: React.MutableRefObject<number>;
   focus?: { latitude: number | null; longitude: number | null } | null;
+  motionEnabled: boolean;
   children?: ReactNode;
 }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -311,6 +313,10 @@ function GlobeShell({
 
   useFrame((_state, delta) => {
     if (groupRef.current) {
+      if (!motionEnabled) {
+        rotationRef.current = groupRef.current.rotation.y;
+        return;
+      }
       if (focusRotationRef.current !== null) {
         groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, focusRotationRef.current, 4.2, delta);
       } else {
@@ -504,6 +510,7 @@ export function GlobeScene({
   mode,
   items,
   focus,
+  motionEnabled = true,
   onModeChange,
   onCameraDistanceChange,
   onEarthPixelDiameterChange,
@@ -513,6 +520,7 @@ export function GlobeScene({
   mode: "cluster" | "items";
   items: ClusterItem[] | PhotoItem[];
   focus?: { latitude: number | null; longitude: number | null } | null;
+  motionEnabled?: boolean;
   onModeChange: (mode: "cluster" | "items") => void;
   onCameraDistanceChange?: (distance: number) => void;
   onEarthPixelDiameterChange?: (diameter: number) => void;
@@ -564,7 +572,13 @@ export function GlobeScene({
         }}
       />
       <fog attach="fog" args={["#8f9398", 6.5, 11]} />
-      <GlobeShell tier={tier} cameraDistance={cameraDistance} rotationRef={globeRotationRef} focus={focus}>
+      <GlobeShell
+        tier={tier}
+        cameraDistance={cameraDistance}
+        rotationRef={globeRotationRef}
+        focus={focus}
+        motionEnabled={motionEnabled}
+      >
         <CityLabels cameraDistance={cameraDistance} />
         {mode === "cluster"
           ? (items as ClusterItem[]).map((item) => <ClusterMarker key={item.id} item={item} />)

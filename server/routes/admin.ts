@@ -9,6 +9,32 @@ function readIds(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function hasOwn(body: unknown, key: string) {
+  return Boolean(body) && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, key);
+}
+
+function readCoordinate(value: unknown) {
+  if (value === "" || value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Latitude and longitude must be valid numbers");
+  }
+  return parsed;
+}
+
+function readCapturedAt(value: unknown) {
+  if (value === "" || value === null) {
+    return null;
+  }
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Captured time must be a valid date");
+  }
+  return parsed.toISOString();
+}
+
 async function geocode(query: string) {
   const response = await fetch(
     `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(query)}`,
@@ -79,6 +105,12 @@ export function createAdminRouter({
     if (req.query.hasGeo === "false") {
       filters.hasGeo = false;
     }
+    if (req.query.hasLocationLabel === "true") {
+      filters.hasLocationLabel = true;
+    }
+    if (req.query.hasLocationLabel === "false") {
+      filters.hasLocationLabel = false;
+    }
     if (req.query.deleted === "true") {
       filters.deleted = true;
     }
@@ -102,13 +134,28 @@ export function createAdminRouter({
   });
 
   router.patch("/photos/:id", requireAdmin, async (req, res) => {
-    const latitude = req.body.latitude === "" || req.body.latitude === null ? null : Number(req.body.latitude);
-    const longitude = req.body.longitude === "" || req.body.longitude === null ? null : Number(req.body.longitude);
+    const body = req.body ?? {};
+    let latitude: number | null | undefined;
+    let longitude: number | null | undefined;
+    let capturedAt: string | null | undefined;
+
+    try {
+      latitude = hasOwn(body, "latitude") ? readCoordinate(req.body.latitude) : undefined;
+      longitude = hasOwn(body, "longitude") ? readCoordinate(req.body.longitude) : undefined;
+      capturedAt = hasOwn(body, "capturedAt") ? readCapturedAt(req.body.capturedAt) : undefined;
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid update payload" });
+      return;
+    }
+
     const updated = await photoService.updatePhoto(String(req.params.id), {
-      title: req.body.title === undefined ? undefined : String(req.body.title),
-      description: req.body.description === undefined ? undefined : String(req.body.description),
-      locationLabel: req.body.locationLabel === undefined ? undefined : String(req.body.locationLabel),
-      visibilityStatus: req.body.visibilityStatus === undefined ? undefined : (req.body.visibilityStatus === "hidden" ? "hidden" : "visible"),
+      title: hasOwn(body, "title") ? String(req.body.title ?? "") : undefined,
+      description: hasOwn(body, "description") ? String(req.body.description ?? "") : undefined,
+      capturedAt,
+      locationLabel: hasOwn(body, "locationLabel") ? String(req.body.locationLabel ?? "") : undefined,
+      visibilityStatus: hasOwn(body, "visibilityStatus")
+        ? (req.body.visibilityStatus === "hidden" ? "hidden" : "visible")
+        : undefined,
       latitude,
       longitude
     });
@@ -174,6 +221,10 @@ export function createAdminRouter({
 
   router.post("/photos/batch/purge", requireAdmin, async (req, res) => {
     res.json(await photoService.batchPurge(readIds(req.body.ids)));
+  });
+
+  router.post("/photos/batch/purge-deleted", requireAdmin, async (_req, res) => {
+    res.json(await photoService.batchPurgeDeleted());
   });
 
   router.post("/photos/batch/gps", requireAdmin, async (req, res) => {

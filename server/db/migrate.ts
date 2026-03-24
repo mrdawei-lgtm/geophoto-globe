@@ -1,6 +1,12 @@
 import { getDb } from "./client.js";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 4;
+
+function hasColumn(tableName: string, columnName: string) {
+  const db = getDb();
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
 
 export function migrateDatabase() {
   const db = getDb();
@@ -20,12 +26,18 @@ export function migrateDatabase() {
         display_image_url TEXT NOT NULL,
         title TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
+        description_source TEXT NOT NULL DEFAULT 'none' CHECK (description_source IN ('none', 'auto', 'manual')),
         captured_at TEXT,
         latitude REAL,
         longitude REAL,
         altitude REAL,
         has_geo INTEGER NOT NULL DEFAULT 0,
         location_label TEXT NOT NULL DEFAULT '',
+        geo_country_en TEXT NOT NULL DEFAULT '',
+        geo_region_en TEXT NOT NULL DEFAULT '',
+        geo_locality_en TEXT NOT NULL DEFAULT '',
+        geo_summary_en TEXT NOT NULL DEFAULT '',
+        geo_resolved_at TEXT,
         visibility_status TEXT NOT NULL CHECK (visibility_status IN ('visible', 'hidden')),
         deleted_at TEXT,
         imported_at TEXT NOT NULL,
@@ -73,6 +85,42 @@ export function migrateDatabase() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_import_job_items_job_id ON import_job_items (job_id, created_at);
+    `);
+  }
+
+  if (currentVersion < 3) {
+    if (!hasColumn("photos", "geo_country_en")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN geo_country_en TEXT NOT NULL DEFAULT ''`);
+    }
+    if (!hasColumn("photos", "geo_region_en")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN geo_region_en TEXT NOT NULL DEFAULT ''`);
+    }
+    if (!hasColumn("photos", "geo_locality_en")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN geo_locality_en TEXT NOT NULL DEFAULT ''`);
+    }
+    if (!hasColumn("photos", "geo_summary_en")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN geo_summary_en TEXT NOT NULL DEFAULT ''`);
+    }
+    if (!hasColumn("photos", "geo_resolved_at")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN geo_resolved_at TEXT`);
+    }
+  }
+
+  if (currentVersion < 4) {
+    if (!hasColumn("photos", "description_source")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN description_source TEXT NOT NULL DEFAULT 'none' CHECK (description_source IN ('none', 'auto', 'manual'))`);
+    }
+    db.exec(`
+      UPDATE photos
+      SET description_source = CASE
+        WHEN TRIM(COALESCE(description, '')) <> '' THEN 'manual'
+        ELSE 'none'
+      END
+      WHERE COALESCE(description_source, '') NOT IN ('none', 'auto', 'manual')
+         OR (
+           description_source = 'none'
+           AND TRIM(COALESCE(description, '')) <> ''
+         )
     `);
   }
 

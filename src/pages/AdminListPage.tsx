@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ImportJob, PhotoListItem } from "../lib/api";
 
 type GeoFilter = "all" | "missing" | "attached";
+type LocationLabelFilter = "all" | "missing" | "present";
 type VisibilityFilter = "all" | "hidden" | "visible";
 type DeletedFilter = "all" | "deleted" | "active";
 type GpsMode = "coordinates" | "address";
@@ -37,6 +38,7 @@ export function AdminListPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [geoFilter, setGeoFilter] = useState<GeoFilter>("all");
+  const [locationLabelFilter, setLocationLabelFilter] = useState<LocationLabelFilter>("all");
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("all");
   const [deletedFilter, setDeletedFilter] = useState<DeletedFilter>("all");
   const [error, setError] = useState("");
@@ -65,6 +67,12 @@ export function AdminListPage() {
       if (geoFilter === "attached") {
         params.set("hasGeo", "true");
       }
+      if (locationLabelFilter === "present") {
+        params.set("hasLocationLabel", "true");
+      }
+      if (locationLabelFilter === "missing") {
+        params.set("hasLocationLabel", "false");
+      }
       if (visibilityFilter !== "all") {
         params.set("visibilityStatus", visibilityFilter);
       }
@@ -76,6 +84,7 @@ export function AdminListPage() {
       }
       const data = await api.listAdminPhotos(params.size ? `?${params.toString()}` : "");
       setItems(data.items);
+      setSelected((current) => current.filter((id) => data.items.some((item) => item.id === id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load photos");
     }
@@ -103,6 +112,14 @@ export function AdminListPage() {
 
   function toggle(id: string) {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }
+
+  function selectAllVisible() {
+    setSelected(items.map((item) => item.id));
+  }
+
+  function clearSelection() {
+    setSelected([]);
   }
 
   async function doBatch(action: "visible" | "hidden" | "delete" | "restore" | "purge" | "gps") {
@@ -139,6 +156,26 @@ export function AdminListPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch update failed");
+    }
+  }
+
+  async function purgeDeletedPhotos() {
+    const confirmed = window.confirm(
+      "Permanently delete every photo currently in deleted state? This will remove database records and image files. This cannot be undone."
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      setError("");
+      const result = await api.batchPurgeDeleted();
+      setSelected([]);
+      setNotice(
+        `Empty trash finished: ${result.successCount} purged, ${result.failedCount} failed, ${result.skippedCount} skipped.`
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to empty deleted photos");
     }
   }
 
@@ -344,6 +381,14 @@ export function AdminListPage() {
             <option value="attached">GPS attached</option>
           </select>
           <select
+            value={locationLabelFilter}
+            onChange={(event) => setLocationLabelFilter(event.target.value as LocationLabelFilter)}
+          >
+            <option value="all">All place labels</option>
+            <option value="present">With place label</option>
+            <option value="missing">Without place label</option>
+          </select>
+          <select
             value={visibilityFilter}
             onChange={(event) => setVisibilityFilter(event.target.value as VisibilityFilter)}
           >
@@ -359,6 +404,12 @@ export function AdminListPage() {
           <button onClick={() => void load()}>Search</button>
         </div>
         <div className="toolbar-group">
+          <button type="button" onClick={selectAllVisible} disabled={!items.length}>
+            Select all
+          </button>
+          <button type="button" onClick={clearSelection} disabled={!selected.length}>
+            Deselect all
+          </button>
           <button onClick={() => void doBatch("visible")}>Show</button>
           <button onClick={() => void doBatch("hidden")}>Hide</button>
           <button onClick={() => void doBatch("gps")}>Set GPS</button>
@@ -368,6 +419,9 @@ export function AdminListPage() {
           <button onClick={() => void doBatch("restore")}>Restore</button>
           <button onClick={() => void doBatch("purge")} className="danger">
             Purge
+          </button>
+          <button type="button" onClick={() => void purgeDeletedPhotos()} className="danger">
+            Empty trash
           </button>
         </div>
       </section>
@@ -434,6 +488,7 @@ export function AdminListPage() {
             </Link>
             <div className="photo-meta">
               <strong>{item.title}</strong>
+              <span>{item.locationLabel ? `Place: ${item.locationLabel}` : "Place label missing"}</span>
               <span>{item.hasGeo ? "GPS attached" : "Missing GPS"}</span>
               <span>{item.visibilityStatus}</span>
               <span>{item.deletedAt ? "Deleted" : "Active"}</span>

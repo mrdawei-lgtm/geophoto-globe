@@ -35,14 +35,7 @@ function formatCapturedDate(value: string | null) {
 
 function buildLightboxImageStyle(imageFillMode: boolean, fillScrollAxis: "x" | "y") {
   if (!imageFillMode) {
-    return {
-      width: "auto",
-      height: "auto",
-      maxWidth: "100%",
-      maxHeight: "100%",
-      objectFit: "contain" as const,
-      margin: "auto"
-    };
+    return undefined;
   }
 
   if (fillScrollAxis === "x") {
@@ -190,7 +183,8 @@ export function PublicGlobePage() {
             tier={tier}
             mode={mode}
             items={items as never[]}
-            focus={currentPhoto ? { latitude: currentPhoto.latitude, longitude: currentPhoto.longitude } : null}
+            focus={null}
+            motionEnabled={!selected}
             onModeChange={setMode}
             onCameraDistanceChange={setCameraDistance}
             onEarthPixelDiameterChange={setEarthPixelDiameter}
@@ -252,14 +246,24 @@ export function PublicGlobePage() {
                 aria-pressed={imageFillMode}
                 aria-label={imageFillMode ? "Fit image to frame" : "Fill image frame"}
               >
-                {imageFillMode ? "Fit" : "Fill"}
+                {imageFillMode ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" />
+                    <path d="M9 9h6v6H9z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5" />
+                    <path d="M6 12h12M12 6v12" />
+                  </svg>
+                )}
               </button>
             </div>
             <div className="lightbox-copy">
-              <p className="lightbox-geo-title">{formatGeoPrimaryLabel(selected.geoPrimaryLabel)}</p>
               <p className="lightbox-place-name">{currentPhoto.locationLabel || "Location label not set."}</p>
-              <p>{currentPhoto.description || "No description yet."}</p>
-              <p>{formatCapturedDate(currentPhoto.capturedAt)}</p>
+              <p className="lightbox-geo-title">{formatGeoPrimaryLabel(selected.geoPrimaryLabel)}</p>
+              <p className="lightbox-description">{currentPhoto.description || "No description yet."}</p>
+              <p className="lightbox-captured-at">{formatCapturedDate(currentPhoto.capturedAt)}</p>
             </div>
           </div>
         </div>

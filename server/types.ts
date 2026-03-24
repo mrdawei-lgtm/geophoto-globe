@@ -1,4 +1,13 @@
 export type VisibilityStatus = "visible" | "hidden";
+export type DescriptionSource = "none" | "auto" | "manual";
+
+export type GeoSummaryFields = {
+  geoCountryEn: string;
+  geoRegionEn: string;
+  geoLocalityEn: string;
+  geoSummaryEn: string;
+  geoResolvedAt: string | null;
+};
 
 export type PhotoRecord = {
   id: string;
@@ -8,12 +17,18 @@ export type PhotoRecord = {
   displayImageUrl: string;
   title: string;
   description: string;
+  descriptionSource: DescriptionSource;
   capturedAt: string | null;
   latitude: number | null;
   longitude: number | null;
   altitude: number | null;
   hasGeo: boolean;
   locationLabel: string;
+  geoCountryEn: string;
+  geoRegionEn: string;
+  geoLocalityEn: string;
+  geoSummaryEn: string;
+  geoResolvedAt: string | null;
   visibilityStatus: VisibilityStatus;
   deletedAt: string | null;
   importedAt: string;
@@ -23,6 +38,7 @@ export type PhotoRecord = {
 export type PhotoListFilters = {
   visibilityStatus?: VisibilityStatus;
   hasGeo?: boolean;
+  hasLocationLabel?: boolean;
   deleted?: boolean;
   q?: string;
 };

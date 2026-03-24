@@ -2,6 +2,51 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.8 - 2026-03-24
+
+### Added
+
+- Added shared-location Chinese narrative support with persisted `description_source` tracking for `none`, `auto`, and `manual`
+- Added a pluggable OpenAI-compatible location narrative service plus `NARRATIVE_API_BASE_URL`, `NARRATIVE_API_KEY`, and `NARRATIVE_MODEL` configuration
+- Added a `narrative:backfill` script to normalize or generate shared intros for existing GPS-tagged coordinate groups
+
+### Changed
+
+- Changed photo import so images with GPS now immediately reuse or generate a shared Chinese intro for their exact coordinate group
+- Changed single-photo GPS edits and batch GPS writes so moving photos to a coordinate group now resolves the shared intro for that destination instead of carrying the old description across
+- Changed admin photo detail editing so manual description edits on GPS-tagged photos synchronize to all photos at the same exact coordinates
+- Changed admin photo update requests to patch only dirty fields, allowing GPS changes and manual description edits to follow separate backend semantics safely
+- Changed backend config loading so local `.env` values are read automatically by the server and narrative backfill scripts
+
+## 0.1.7 - 2026-03-24
+
+### Added
+
+- Added persisted English geo summary fields in SQLite for country, region, locality, formatted summary, and last resolution time
+- Added a rate-limited backend geo summary service that reverse geocodes GPS coordinates in English and caches the result at write time
+- Added a `geo:backfill` script to refresh English geo summaries for existing GPS-tagged photos
+
+### Changed
+
+- Changed public geo summary generation so the lightbox first line now reads from cached database values instead of doing per-request reverse geocoding
+- Changed English geo summary formatting toward `city, province, country`, with municipality-specific fallback such as `Beijing, China`
+- Changed public lightbox layout to keep the image area dominant, move text beneath the image, and replace the fit/fill text control with a circular line-icon button
+- Changed public lightbox navigation to show only `current / total` paging text while keeping previous/next controls anchored in the image area
+- Changed public globe thumbnail/cluster switching distance from `4.7` to `4.0`
+- Changed public globe behavior so opening the lightbox pauses globe motion at the current rotation and zoom, then resumes auto-rotation after close
+- Changed public thumbnail mode to return all deduplicated GPS points instead of truncating to a small global cap
+- Changed admin photo list ordering so photos with identical exact GPS coordinates stay grouped together instead of being split apart by unrelated items
+
+### Improved
+
+- Improved geo summary robustness by filtering out postcode-like segments, preferring English display-name fallbacks, and avoiding non-English output in the generated first-line summary
+- Improved lightbox image controls with a fixed image viewport, more stable fit/fill behavior, and centered fit-mode alignment
+
+### Fixed
+
+- Fixed public geo summary fallback so missing English summaries now show `Location unavailable` instead of silently falling back to `locationLabel`
+- Fixed municipality and postcode-related geo summary issues that previously produced results such as district names plus postal codes instead of cleaner city/country output
+
 ## 0.1.6 - 2026-03-22
 
 ### Added

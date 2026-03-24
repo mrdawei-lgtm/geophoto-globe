@@ -107,6 +107,8 @@ Admin workflow:
    Open a photo editor
 5. 编辑标题、介绍、地点标签  
    Edit title, description, and location label
+   同坐标照片共用一段地点简介  
+   Photos with the exact same coordinates share one location intro
 6. 对无 GPS 图片手动补点  
    Add GPS to photos missing coordinates
 7. 输入地址搜索坐标并确认写入  
@@ -207,6 +209,7 @@ Each photo currently includes at least these fields:
 - `displayImageUrl`
 - `title`
 - `description`
+- `descriptionSource`
 - `capturedAt`
 - `latitude`
 - `longitude`
@@ -223,10 +226,14 @@ State rules:
 
 - `visibilityStatus` 只有 `visible` 和 `hidden`  
   `visibilityStatus` is either `visible` or `hidden`
+- `descriptionSource` 只有 `none`、`auto` 和 `manual`  
+  `descriptionSource` is either `none`, `auto`, or `manual`
 - 删除采用软删除，用 `deletedAt` 标记  
   Deletion is soft deletion via `deletedAt`
 - 前台只显示 `visible + deletedAt = null + hasGeo = true` 的记录  
   The public frontend only shows `visible + deletedAt = null + hasGeo = true`
+- 同一精确坐标的照片共享 `description`  
+  Photos at the exact same coordinates share the same `description`
 
 ## 图片导入流程 | Photo Import Flow
 
@@ -249,6 +256,8 @@ After upload, the server processes each photo as follows:
      Parse EXIF metadata
    - 提取拍摄时间、GPS、海拔  
      Extract capture time, GPS, and altitude
+   - 若已有 GPS，则按同坐标组生成或复用中文简介  
+     If GPS already exists, generate or reuse a shared Chinese intro for that coordinate group
    - 生成缩略图到 `storage/thumbs`  
      Generate a thumbnail in `storage/thumbs`
    - 生成展示图到 `storage/display`  
@@ -316,6 +325,8 @@ In the photo editor, the admin can:
   Enter coordinates directly
 - 输入地址搜索坐标  
   Search by address
+- 编辑 `description` 时，同坐标照片会自动同步  
+  Editing `description` automatically syncs the same text to photos at the exact same coordinates
 - 保存后更新数据库并写回托管副本 EXIF  
   Update the database and write GPS back into the managed copy EXIF
 
@@ -330,6 +341,8 @@ The first version uses a shared-location batch GPS mode:
   Enter one coordinate pair or one address
 - 系统把同一地点写入所有选中照片  
   The system applies the same location to all selected photos
+- 系统随后按该坐标组生成或复用同一段中文简介  
+  The system then generates or reuses one shared Chinese intro for that coordinate group
 
 ## API 摘要 | API Summary
 
@@ -375,6 +388,9 @@ cp .env.example .env
 npm run db:bootstrap
 ```
 
+服务端和回填脚本会自动读取项目根目录下的 `.env`，无需先手动 `source .env`。  
+The backend server and backfill scripts automatically load the project-root `.env`; manual `source .env` is not required.
+
 如果本机没有全局 Node，也可以使用仓库内本地运行时：  
 If you do not have a global Node installation, you can also use the local runtime in the repo:
 
@@ -392,6 +408,13 @@ npm install
 npm run db:bootstrap
 npm run dev
 ```
+
+可选环境变量（用于自动生成地点简介）：  
+Optional environment variables for automatic location intros:
+
+- `NARRATIVE_API_BASE_URL`
+- `NARRATIVE_API_KEY`
+- `NARRATIVE_MODEL`
 
 默认地址：  
 Default addresses:
@@ -416,6 +439,7 @@ Minimal verification flow:
 ```bash
 npm run verify
 npm run dev
+npm run narrative:backfill
 ```
 
 如果你使用仓库内本地 Node：  
@@ -424,6 +448,7 @@ If you are using the repo-local Node runtime:
 ```bash
 ./scripts/with-local-node.sh npm run verify
 ./scripts/with-local-node.sh npm run dev
+./scripts/with-local-node.sh npm run narrative:backfill
 ```
 
 验证点：  
@@ -433,6 +458,8 @@ Verification checklist:
   Open `http://localhost:5173` and confirm the public globe renders with published photos
 - 打开 `http://localhost:5173/admin/login`，使用 `.env` 里的 `ADMIN_PASSWORD` 登录 CMS  
   Open `http://localhost:5173/admin/login` and sign in with `ADMIN_PASSWORD` from `.env`
+- 在后台给一张无 GPS 图片补点，确认会自动接入同坐标共享简介  
+  Add GPS to a photo that was missing coordinates and confirm it receives the shared intro for that coordinate group
 
 ## 服务器部署 | Deployment
 

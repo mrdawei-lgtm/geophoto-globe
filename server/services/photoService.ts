@@ -2,14 +2,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Express } from "express";
 import { appRoot } from "../config.js";
-import { ingestUploadedFile, parseMetadata, toPublicPath, writeGpsToManagedExif } from "../image.js";
+import { ingestUploadedFile, parseMetadata, readCapturedAtFromExif, toPublicPath, writeGpsToManagedExif } from "../image.js";
 import { ImportJobRepository } from "../repositories/importJobRepository.js";
 import { PhotoRepository } from "../repositories/photoRepository.js";
-import type { ImportJobWithItems, PhotoListFilters, PhotoRecord, VisibilityStatus } from "../types.js";
+import { GeoSummaryService, emptyGeoSummaryFields } from "./geoSummaryService.js";
+import { LocationNarrativeService } from "./locationNarrativeService.js";
+import type { LocationNarrativeGenerationResult } from "./locationNarrativeService.js";
+import type {
+  DescriptionSource,
+  ImportJobWithItems,
+  PhotoListFilters,
+  PhotoRecord,
+  VisibilityStatus
+} from "../types.js";
 
 type UpdatePhotoInput = {
   title?: string;
   description?: string;
+  capturedAt?: string | null;
   locationLabel?: string;
   visibilityStatus?: VisibilityStatus;
   latitude?: number | null;
@@ -46,10 +56,94 @@ function publicAssetPathToAbsolute(urlPath: string | null | undefined) {
   return path.join(appRoot, normalized);
 }
 
+function groupPhotosByExactCoordinates(photos: PhotoRecord[]) {
+  const grouped = new Map<string, PhotoRecord[]>();
+  const orderedKeys: string[] = [];
+  const ungrouped: PhotoRecord[] = [];
+
+  for (const photo of photos) {
+    if (photo.latitude === null || photo.longitude === null) {
+      ungrouped.push(photo);
+      continue;
+    }
+
+    const key = `${photo.latitude}:${photo.longitude}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.push(photo);
+    } else {
+      grouped.set(key, [photo]);
+      orderedKeys.push(key);
+    }
+  }
+
+  return [
+    ...orderedKeys.flatMap((key) => grouped.get(key) ?? []),
+    ...ungrouped
+  ];
+}
+
+function sameCoordinates(
+  left: { latitude: number | null; longitude: number | null },
+  right: { latitude: number | null; longitude: number | null }
+) {
+  return left.latitude === right.latitude && left.longitude === right.longitude;
+}
+
+function normalizeDescription(value: string | undefined) {
+  return (value ?? "").trim();
+}
+
+function inferDescriptionSource(description: string): DescriptionSource {
+  return description ? "manual" : "none";
+}
+
+function coordinateKey(photo: { latitude: number | null; longitude: number | null }) {
+  return `${photo.latitude}:${photo.longitude}`;
+}
+
+function sortByUpdatedAtDesc(photos: PhotoRecord[]) {
+  return [...photos].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function countCharacters(value: string) {
+  return Array.from(value).length;
+}
+
+export type NarrativeBackfillGroupResult = {
+  key: string;
+  photoCount: number;
+  latitude: number;
+  longitude: number;
+  locationLabel: string;
+  geoSummaryEn: string;
+  status: "success" | "failure" | "skipped";
+  action: "updated" | "unchanged" | "skipped_manual" | "preserved_existing" | "empty";
+  descriptionSource: DescriptionSource;
+  descriptionPreview: string;
+  wasTruncated: boolean;
+  rawCharacterCount: number;
+  finishReason: string | null;
+  retriedFinalOnly: boolean;
+  error: string | null;
+};
+
+export type CapturedAtBackfillPhotoResult = {
+  id: string;
+  title: string;
+  locationLabel: string;
+  status: "updated" | "unchanged" | "failed";
+  previousCapturedAt: string | null;
+  nextCapturedAt: string | null;
+  error: string | null;
+};
+
 export class PhotoService {
   constructor(
     private readonly photoRepository = new PhotoRepository(),
-    private readonly importJobRepository = new ImportJobRepository()
+    private readonly importJobRepository = new ImportJobRepository(),
+    private readonly geoSummaryService = new GeoSummaryService(),
+    private readonly locationNarrativeService = new LocationNarrativeService()
   ) {}
 
   listPublicPhotos() {
@@ -57,11 +151,111 @@ export class PhotoService {
   }
 
   listAdminPhotos(filters: PhotoListFilters) {
-    return this.photoRepository.list(filters);
+    return groupPhotosByExactCoordinates(this.photoRepository.list(filters));
   }
 
   getPhoto(id: string) {
     return this.photoRepository.getById(id);
+  }
+
+  private async resolveGeoSummaryForCoordinates(latitude: number | null, longitude: number | null) {
+    if (latitude === null || longitude === null) {
+      return emptyGeoSummaryFields();
+    }
+    return this.geoSummaryService.resolve(latitude, longitude);
+  }
+
+  private listCoordinateGroup(latitude: number | null, longitude: number | null) {
+    if (latitude === null || longitude === null) {
+      return [];
+    }
+    return this.photoRepository.listByCoordinates(latitude, longitude);
+  }
+
+  private async resolveSharedDescriptionForGroup(
+    photos: PhotoRecord[],
+    options?: { forceRegenerate?: boolean }
+  ): Promise<{
+    description: string;
+    descriptionSource: DescriptionSource;
+    generation: LocationNarrativeGenerationResult | null;
+  }> {
+    const ordered = sortByUpdatedAtDesc(photos);
+    const manual = ordered.find((photo) => photo.descriptionSource === "manual" && normalizeDescription(photo.description));
+    if (manual) {
+      return {
+        description: normalizeDescription(manual.description),
+        descriptionSource: "manual" as const,
+        generation: null
+      };
+    }
+
+    const existing = ordered.find((photo) => normalizeDescription(photo.description));
+    if (existing && !options?.forceRegenerate) {
+      return {
+        description: normalizeDescription(existing.description),
+        descriptionSource: existing.descriptionSource === "none" ? ("auto" as const) : existing.descriptionSource,
+        generation: null
+      };
+    }
+
+    const generation = await this.locationNarrativeService.generateDetailedForPhotos(photos);
+    const generated = normalizeDescription(generation.description);
+    return {
+      description: generated,
+      descriptionSource: generated ? ("auto" as const) : ("none" as const),
+      generation
+    };
+  }
+
+  private async syncSharedDescriptionForCoordinates(
+    latitude: number | null,
+    longitude: number | null,
+    options?: { forceRegenerate?: boolean }
+  ) {
+    const group = this.listCoordinateGroup(latitude, longitude);
+    if (!group.length) {
+      return [];
+    }
+
+    const resolved = await this.resolveSharedDescriptionForGroup(group, options);
+    const needsUpdate = group.some(
+      (photo) =>
+        normalizeDescription(photo.description) !== resolved.description ||
+        photo.descriptionSource !== resolved.descriptionSource
+    );
+
+    if (!needsUpdate) {
+      return group;
+    }
+
+    return this.photoRepository.batchUpdate(
+      group.map((photo) => photo.id),
+      {
+        description: resolved.description,
+        descriptionSource: resolved.descriptionSource
+      }
+    );
+  }
+
+  private setManualDescriptionForCoordinates(latitude: number, longitude: number, description: string) {
+    const group = this.listCoordinateGroup(latitude, longitude);
+    if (!group.length) {
+      return [];
+    }
+
+    const normalized = normalizeDescription(description);
+    return this.photoRepository.batchUpdate(
+      group.map((photo) => photo.id),
+      {
+        description: normalized,
+        descriptionSource: inferDescriptionSource(normalized)
+      }
+    );
+  }
+
+  private findUpdatedPhoto(photos: PhotoRecord[], id: string) {
+    return photos.find((photo) => photo.id === id) ?? this.photoRepository.getById(id);
   }
 
   async updatePhoto(id: string, input: UpdatePhotoInput) {
@@ -70,23 +264,78 @@ export class PhotoService {
       return null;
     }
 
+    const capturedAt = input.capturedAt === undefined ? current.capturedAt : input.capturedAt;
     const latitude = input.latitude === undefined ? current.latitude : input.latitude;
     const longitude = input.longitude === undefined ? current.longitude : input.longitude;
     const hasGeo = latitude !== null && longitude !== null;
+    const coordinatesChanged = !sameCoordinates(current, { latitude, longitude });
+    const capturedAtChanged = capturedAt !== current.capturedAt;
+    const descriptionChanged = input.description !== undefined;
+    const nextDescription = descriptionChanged
+      ? normalizeDescription(input.description)
+      : hasGeo && coordinatesChanged
+        ? ""
+        : current.description;
+    const nextDescriptionSource = descriptionChanged
+      ? inferDescriptionSource(nextDescription)
+      : hasGeo && coordinatesChanged
+        ? ("none" as const)
+        : current.descriptionSource;
 
     if (hasGeo) {
       await writeGpsToManagedExif(current.managedAssetPath, latitude, longitude);
     }
 
-    return this.photoRepository.update(id, {
+    const shouldRefreshGeoSummary =
+      !hasGeo ||
+      coordinatesChanged ||
+      !current.geoSummaryEn;
+    const geoSummaryFields = shouldRefreshGeoSummary
+      ? await this.resolveGeoSummaryForCoordinates(latitude, longitude)
+      : {
+          geoCountryEn: current.geoCountryEn,
+          geoRegionEn: current.geoRegionEn,
+          geoLocalityEn: current.geoLocalityEn,
+          geoSummaryEn: current.geoSummaryEn,
+          geoResolvedAt: current.geoResolvedAt
+        };
+
+    const updated = this.photoRepository.update(id, {
       title: input.title ?? current.title,
-      description: input.description ?? current.description,
+      description: nextDescription,
+      descriptionSource: nextDescriptionSource,
+      capturedAt,
       locationLabel: input.locationLabel ?? current.locationLabel,
       visibilityStatus: input.visibilityStatus ?? current.visibilityStatus,
       latitude,
       longitude,
-      hasGeo
+      hasGeo,
+      ...geoSummaryFields
     });
+    if (!updated) {
+      return null;
+    }
+
+    if (!hasGeo) {
+      return updated;
+    }
+
+    if (descriptionChanged) {
+      return this.findUpdatedPhoto(this.setManualDescriptionForCoordinates(latitude, longitude, nextDescription), id);
+    }
+
+    if (coordinatesChanged) {
+      return this.findUpdatedPhoto(await this.syncSharedDescriptionForCoordinates(latitude, longitude), id);
+    }
+
+    if (capturedAtChanged) {
+      return this.findUpdatedPhoto(
+        await this.syncSharedDescriptionForCoordinates(latitude, longitude, { forceRegenerate: true }),
+        id
+      );
+    }
+
+    return updated;
   }
 
   batchVisibility(ids: string[], visibilityStatus: VisibilityStatus) {
@@ -141,8 +390,18 @@ export class PhotoService {
     };
   }
 
+  async batchPurgeDeleted() {
+    const deletedIds = this.photoRepository
+      .list({ deleted: true })
+      .filter((photo) => Boolean(photo.deletedAt))
+      .map((photo) => photo.id);
+
+    return this.batchPurge(deletedIds);
+  }
+
   async batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string) {
     const updated: PhotoRecord[] = [];
+    const geoSummaryFields = await this.resolveGeoSummaryForCoordinates(latitude, longitude);
     for (const id of ids) {
       const photo = this.photoRepository.getById(id);
       if (!photo) {
@@ -153,13 +412,19 @@ export class PhotoService {
         latitude,
         longitude,
         hasGeo: true,
-        locationLabel: locationLabel || photo.locationLabel
+        description: "",
+        descriptionSource: "none",
+        locationLabel: locationLabel || photo.locationLabel,
+        ...geoSummaryFields
       });
       if (result) {
         updated.push(result);
       }
     }
-    return updated;
+    const synced = await this.syncSharedDescriptionForCoordinates(latitude, longitude);
+    return updated
+      .map((photo) => synced.find((item) => item.id === photo.id) ?? this.photoRepository.getById(photo.id))
+      .filter((photo): photo is PhotoRecord => Boolean(photo));
   }
 
   createImportJob(filenames: string[]) {
@@ -195,6 +460,10 @@ export class PhotoService {
       generated = await ingestUploadedFile(file.path, file.originalname);
       const metadata = await parseMetadata(generated.managedTarget);
       const now = new Date().toISOString();
+      const geoSummaryFields =
+        metadata.hasGeo && metadata.latitude !== null && metadata.longitude !== null
+          ? await this.resolveGeoSummaryForCoordinates(metadata.latitude, metadata.longitude)
+          : emptyGeoSummaryFields();
       const record: PhotoRecord = {
         id: generated.id,
         originalAssetPath: generated.originalTarget,
@@ -203,12 +472,14 @@ export class PhotoService {
         displayImageUrl: toPublicPath(generated.displayTarget),
         title: readTitleFromFilename(file.originalname),
         description: "",
+        descriptionSource: "none",
         capturedAt: metadata.capturedAt,
         latitude: metadata.latitude,
         longitude: metadata.longitude,
         altitude: metadata.altitude,
         hasGeo: metadata.hasGeo,
         locationLabel: "",
+        ...geoSummaryFields,
         visibilityStatus: "visible",
         deletedAt: null,
         importedAt: now,
@@ -216,6 +487,9 @@ export class PhotoService {
       };
 
       this.photoRepository.upsert(record);
+      if (record.hasGeo && record.latitude !== null && record.longitude !== null) {
+        await this.syncSharedDescriptionForCoordinates(record.latitude, record.longitude);
+      }
       this.importJobRepository.updateItem(itemId, {
         status: "success",
         photoId: record.id,
@@ -274,5 +548,304 @@ export class PhotoService {
 
   getImportJob(jobId: string): ImportJobWithItems | null {
     return this.importJobRepository.getJobWithItems(jobId);
+  }
+
+  async backfillGeoSummaries(force = false) {
+    const photos = this.photoRepository.list({ hasGeo: true });
+    const targetPhotos = force ? photos : photos.filter((photo) => !photo.geoSummaryEn.trim());
+    const groups = new Map<string, PhotoRecord[]>();
+
+    for (const photo of targetPhotos) {
+      if (photo.latitude === null || photo.longitude === null) {
+        continue;
+      }
+      const key = `${photo.latitude}:${photo.longitude}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.push(photo);
+      } else {
+        groups.set(key, [photo]);
+      }
+    }
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const group of groups.values()) {
+      const [firstPhoto] = group;
+      if (firstPhoto.latitude === null || firstPhoto.longitude === null) {
+        skippedCount += group.length;
+        continue;
+      }
+      const geoSummaryFields = await this.resolveGeoSummaryForCoordinates(firstPhoto.latitude, firstPhoto.longitude);
+      if (!geoSummaryFields.geoSummaryEn) {
+        skippedCount += group.length;
+        continue;
+      }
+      this.photoRepository.batchUpdate(
+        group.map((photo) => photo.id),
+        geoSummaryFields
+      );
+      updatedCount += group.length;
+    }
+
+    return {
+      totalWithGeo: photos.length,
+      missingSummaryCount: targetPhotos.length,
+      coordinateGroupCount: groups.size,
+      updatedCount,
+      skippedCount
+    };
+  }
+
+  async backfillCapturedAt(options?: {
+    onPhotoProcessed?: (result: CapturedAtBackfillPhotoResult, index: number, total: number) => void | Promise<void>;
+  }) {
+    const photos = this.photoRepository.list();
+    const totalCount = photos.length;
+    let updatedCount = 0;
+    let unchangedCount = 0;
+    let failedCount = 0;
+
+    for (let index = 0; index < photos.length; index += 1) {
+      const photo = photos[index];
+      try {
+        const nextCapturedAt = await readCapturedAtFromExif(photo.originalAssetPath);
+        const status = nextCapturedAt === photo.capturedAt ? "unchanged" : "updated";
+
+        if (status === "updated") {
+          this.photoRepository.update(photo.id, { capturedAt: nextCapturedAt });
+          updatedCount += 1;
+        } else {
+          unchangedCount += 1;
+        }
+
+        await options?.onPhotoProcessed?.(
+          {
+            id: photo.id,
+            title: photo.title,
+            locationLabel: photo.locationLabel,
+            status,
+            previousCapturedAt: photo.capturedAt,
+            nextCapturedAt,
+            error: null
+          },
+          index + 1,
+          totalCount
+        );
+      } catch (error) {
+        failedCount += 1;
+        await options?.onPhotoProcessed?.(
+          {
+            id: photo.id,
+            title: photo.title,
+            locationLabel: photo.locationLabel,
+            status: "failed",
+            previousCapturedAt: photo.capturedAt,
+            nextCapturedAt: null,
+            error: error instanceof Error ? error.message : "Failed to backfill captured time"
+          },
+          index + 1,
+          totalCount
+        );
+      }
+    }
+
+    return {
+      totalCount,
+      updatedCount,
+      unchangedCount,
+      failedCount
+    };
+  }
+
+  async backfillLocationNarratives(options?: {
+    forceRegenerate?: boolean;
+    concurrency?: number;
+    onGroupProcessed?: (result: NarrativeBackfillGroupResult, index: number, total: number) => void | Promise<void>;
+  }) {
+    const photos = this.photoRepository.list({ hasGeo: true });
+    const groups = new Map<string, PhotoRecord[]>();
+
+    for (const photo of photos) {
+      if (photo.latitude === null || photo.longitude === null) {
+        continue;
+      }
+      const key = coordinateKey(photo);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.push(photo);
+      } else {
+        groups.set(key, [photo]);
+      }
+    }
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    let truncatedCount = 0;
+    let processedGroupCount = 0;
+    const totalGroupCount = groups.size;
+    const entries = Array.from(groups.entries());
+    let nextIndex = 0;
+    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 4, totalGroupCount || 1));
+
+    async function processEntry(this: PhotoService, entry: [string, PhotoRecord[]]) {
+      const [key, group] = entry;
+      const [firstPhoto] = group;
+      const locationLabel = group.find((photo) => normalizeDescription(photo.locationLabel))?.locationLabel ?? "";
+      const geoSummaryEn = group.find((photo) => normalizeDescription(photo.geoSummaryEn))?.geoSummaryEn ?? "";
+
+      if (firstPhoto.latitude === null || firstPhoto.longitude === null) {
+        skippedCount += group.length;
+        return {
+          key,
+          photoCount: group.length,
+          latitude: 0,
+          longitude: 0,
+          locationLabel,
+          geoSummaryEn,
+          status: "skipped" as const,
+          action: "empty" as const,
+          descriptionSource: "none" as const,
+          descriptionPreview: "",
+          wasTruncated: false,
+          rawCharacterCount: 0,
+          finishReason: null,
+          retriedFinalOnly: false,
+          error: "Missing coordinates"
+        };
+      }
+
+      const orderedGroup = sortByUpdatedAtDesc(group);
+      const existingWithDescription = orderedGroup.find((photo) => normalizeDescription(photo.description));
+      const hadExistingDescription = Boolean(existingWithDescription);
+      const existingDescription = normalizeDescription(existingWithDescription?.description);
+      const existingSource = existingWithDescription?.descriptionSource ?? "none";
+      const resolved = await this.resolveSharedDescriptionForGroup(group, {
+        forceRegenerate: Boolean(options?.forceRegenerate)
+      });
+      const needsUpdate = group.some(
+        (photo) =>
+          normalizeDescription(photo.description) !== resolved.description ||
+          photo.descriptionSource !== resolved.descriptionSource
+      );
+
+      if (resolved.descriptionSource === "manual") {
+        skippedCount += group.length;
+        return {
+          key,
+          photoCount: group.length,
+          latitude: firstPhoto.latitude,
+          longitude: firstPhoto.longitude,
+          locationLabel,
+          geoSummaryEn,
+          status: "skipped" as const,
+          action: "skipped_manual" as const,
+          descriptionSource: "manual" as const,
+          descriptionPreview: resolved.description.slice(0, 120),
+          wasTruncated: false,
+          rawCharacterCount: countCharacters(resolved.description),
+          finishReason: null,
+          retriedFinalOnly: false,
+          error: null
+        };
+      }
+
+      if (!resolved.description) {
+        failedCount += group.length;
+        return {
+          key,
+          photoCount: group.length,
+          latitude: firstPhoto.latitude,
+          longitude: firstPhoto.longitude,
+          locationLabel,
+          geoSummaryEn,
+          status: "failure" as const,
+          action: hadExistingDescription ? ("preserved_existing" as const) : ("empty" as const),
+          descriptionSource: hadExistingDescription ? existingSource : ("none" as const),
+          descriptionPreview: hadExistingDescription ? existingDescription.slice(0, 120) : "",
+          wasTruncated: false,
+          rawCharacterCount: resolved.generation?.rawCharacterCount ?? 0,
+          finishReason: resolved.generation?.finishReason ?? null,
+          retriedFinalOnly: resolved.generation?.retriedFinalOnly ?? false,
+          error: resolved.generation?.error ?? "Narrative generation returned empty text"
+        };
+      }
+
+      if (!needsUpdate) {
+        skippedCount += group.length;
+        if (resolved.generation?.wasTruncated) {
+          truncatedCount += group.length;
+        }
+        return {
+          key,
+          photoCount: group.length,
+          latitude: firstPhoto.latitude,
+          longitude: firstPhoto.longitude,
+          locationLabel,
+          geoSummaryEn,
+          status: "success" as const,
+          action: "unchanged" as const,
+          descriptionSource: resolved.descriptionSource,
+          descriptionPreview: resolved.description.slice(0, 120),
+          wasTruncated: resolved.generation?.wasTruncated ?? false,
+          rawCharacterCount: resolved.generation?.rawCharacterCount ?? countCharacters(resolved.description),
+          finishReason: resolved.generation?.finishReason ?? null,
+          retriedFinalOnly: resolved.generation?.retriedFinalOnly ?? false,
+          error: null
+        };
+      }
+
+      this.photoRepository.batchUpdate(
+        group.map((photo) => photo.id),
+        {
+          description: resolved.description,
+          descriptionSource: resolved.descriptionSource
+        }
+      );
+      updatedCount += group.length;
+      if (resolved.generation?.wasTruncated) {
+        truncatedCount += group.length;
+      }
+      return {
+        key,
+        photoCount: group.length,
+        latitude: firstPhoto.latitude,
+        longitude: firstPhoto.longitude,
+        locationLabel,
+        geoSummaryEn,
+        status: "success" as const,
+        action: "updated" as const,
+        descriptionSource: resolved.descriptionSource,
+        descriptionPreview: resolved.description.slice(0, 120),
+        wasTruncated: resolved.generation?.wasTruncated ?? false,
+        rawCharacterCount: resolved.generation?.rawCharacterCount ?? countCharacters(resolved.description),
+        finishReason: resolved.generation?.finishReason ?? null,
+        retriedFinalOnly: resolved.generation?.retriedFinalOnly ?? false,
+        error: null
+      };
+    }
+
+    async function worker(this: PhotoService) {
+      while (nextIndex < entries.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const result = await processEntry.call(this, entries[currentIndex]);
+        processedGroupCount += 1;
+        await options?.onGroupProcessed?.(result, processedGroupCount, totalGroupCount);
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker.call(this)));
+
+    return {
+      totalWithGeo: photos.length,
+      coordinateGroupCount: groups.size,
+      updatedCount,
+      skippedCount,
+      failedCount,
+      truncatedCount
+    };
   }
 }

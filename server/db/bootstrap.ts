@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { legacyPhotosJsonPath, storageRoot } from "../config.js";
+import type { DescriptionSource } from "../types.js";
 import type { PhotoRecord } from "../types.js";
 import { getDb } from "./client.js";
 import { migrateDatabase } from "./migrate.js";
@@ -28,10 +29,20 @@ function normalizeAssetPath(assetPath: string) {
 }
 
 function normalizePhoto(record: PhotoRecord): PhotoRecord {
+  const description = record.description ?? "";
+  const descriptionSource: DescriptionSource =
+    record.descriptionSource ?? (description.trim() ? "manual" : "none");
   return {
     ...record,
     originalAssetPath: normalizeAssetPath(record.originalAssetPath),
-    managedAssetPath: normalizeAssetPath(record.managedAssetPath)
+    managedAssetPath: normalizeAssetPath(record.managedAssetPath),
+    description,
+    descriptionSource,
+    geoCountryEn: record.geoCountryEn ?? "",
+    geoRegionEn: record.geoRegionEn ?? "",
+    geoLocalityEn: record.geoLocalityEn ?? "",
+    geoSummaryEn: record.geoSummaryEn ?? "",
+    geoResolvedAt: record.geoResolvedAt ?? null
   };
 }
 
@@ -53,12 +64,18 @@ function importLegacyJsonIfNeeded() {
       display_image_url,
       title,
       description,
+      description_source,
       captured_at,
       latitude,
       longitude,
       altitude,
       has_geo,
       location_label,
+      geo_country_en,
+      geo_region_en,
+      geo_locality_en,
+      geo_summary_en,
+      geo_resolved_at,
       visibility_status,
       deleted_at,
       imported_at,
@@ -71,12 +88,18 @@ function importLegacyJsonIfNeeded() {
       @displayImageUrl,
       @title,
       @description,
+      @descriptionSource,
       @capturedAt,
       @latitude,
       @longitude,
       @altitude,
       @hasGeo,
       @locationLabel,
+      @geoCountryEn,
+      @geoRegionEn,
+      @geoLocalityEn,
+      @geoSummaryEn,
+      @geoResolvedAt,
       @visibilityStatus,
       @deletedAt,
       @importedAt,

@@ -16,6 +16,71 @@ export type ParsedMetadata = {
   hasGeo: boolean;
 };
 
+function toIsoTimestamp(value: unknown): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  if (typeof value === "object") {
+    const withIso = value as { toISOString?: () => string };
+    if (typeof withIso.toISOString === "function") {
+      const iso = withIso.toISOString();
+      const parsed = new Date(iso);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    const withDate = value as { toDate?: () => Date };
+    if (typeof withDate.toDate === "function") {
+      const parsed = withDate.toDate();
+      if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    const withString = value as { toString?: () => string };
+    if (typeof withString.toString === "function") {
+      const raw = withString.toString();
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function readCapturedAtFromExif(filePath: string) {
+  const tags = (await exiftool.read(filePath)) as Record<string, unknown>;
+  const candidates = [
+    tags.DateTimeOriginal,
+    tags.CreateDate,
+    tags.MediaCreateDate,
+    tags.TrackCreateDate,
+    tags.ModifyDate
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = toIsoTimestamp(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
 async function ensureDirs() {
   await Promise.all([
     fs.mkdir(path.join(storageRoot, "originals"), { recursive: true }).catch(() => undefined),
@@ -54,7 +119,7 @@ export async function parseMetadata(filePath: string): Promise<ParsedMetadata> {
   const lat = typeof meta?.latitude === "number" ? meta.latitude : null;
   const lng = typeof meta?.longitude === "number" ? meta.longitude : null;
   const altitude = typeof meta?.altitude === "number" ? meta.altitude : null;
-  const captured = meta?.DateTimeOriginal instanceof Date ? meta.DateTimeOriginal.toISOString() : null;
+  const captured = await readCapturedAtFromExif(filePath);
   return {
     capturedAt: captured,
     latitude: lat,

@@ -3,6 +3,7 @@ export type PhotoListItem = {
   thumbnailUrl: string;
   title: string;
   description: string;
+  descriptionSource: "none" | "auto" | "manual";
   capturedAt: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -82,14 +83,18 @@ export const api = {
     return request<{ items: PhotoListItem[] }>(`/api/admin/photos${query}`, undefined, true);
   },
   getAdminPhoto(id: string) {
-    return request<PhotoListItem & { originalAssetPath: string; managedAssetPath: string }>(
+    return request<PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string }>(
       `/api/admin/photos/${id}`,
       undefined,
       true
     );
   },
   updatePhoto(id: string, payload: Record<string, unknown>) {
-    return request(`/api/admin/photos/${id}`, { method: "PATCH", body: JSON.stringify(payload) }, true);
+    return request<PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string }>(
+      `/api/admin/photos/${id}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+      true
+    );
   },
   createImportJob(filenames: string[]) {
     return request<ImportJob>(
@@ -174,6 +179,14 @@ export const api = {
       failedCount: number;
       skippedCount: number;
     }>("/api/admin/photos/batch/purge", { method: "POST", body: JSON.stringify({ ids }) }, true);
+  },
+  batchPurgeDeleted() {
+    return request<{
+      items: Array<{ id: string; status: "purged" | "failed" | "skipped"; error?: string }>;
+      successCount: number;
+      failedCount: number;
+      skippedCount: number;
+    }>("/api/admin/photos/batch/purge-deleted", { method: "POST" }, true);
   },
   batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string) {
     return request(

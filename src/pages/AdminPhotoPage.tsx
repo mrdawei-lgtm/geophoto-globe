@@ -2,16 +2,88 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, PhotoListItem } from "../lib/api";
 
+type EditablePhoto = PhotoListItem & {
+  displayImageUrl: string;
+  originalAssetPath: string;
+  managedAssetPath: string;
+};
+
+function toLocalDateTimeInputValue(value: string | null) {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const pad = (input: number) => String(input).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+function fromLocalDateTimeInputValue(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function buildDirtyPayload(current: EditablePhoto, original: EditablePhoto) {
+  const payload: Record<string, unknown> = {};
+
+  if (current.title !== original.title) {
+    payload.title = current.title;
+  }
+  if (current.description !== original.description) {
+    payload.description = current.description;
+  }
+  if (current.capturedAt !== original.capturedAt) {
+    payload.capturedAt = current.capturedAt;
+  }
+  if (current.locationLabel !== original.locationLabel) {
+    payload.locationLabel = current.locationLabel;
+  }
+  if (current.visibilityStatus !== original.visibilityStatus) {
+    payload.visibilityStatus = current.visibilityStatus;
+  }
+  if (current.latitude !== original.latitude) {
+    payload.latitude = current.latitude;
+  }
+  if (current.longitude !== original.longitude) {
+    payload.longitude = current.longitude;
+  }
+
+  return payload;
+}
+
+function descriptionSourceLabel(source: PhotoListItem["descriptionSource"]) {
+  if (source === "manual") {
+    return "Manual";
+  }
+  if (source === "auto") {
+    return "Auto";
+  }
+  return "Empty";
+}
+
 export function AdminPhotoPage() {
   const { id = "" } = useParams();
-  const [photo, setPhoto] = useState<(PhotoListItem & { displayImageUrl?: string }) | null>(null);
+  const [photo, setPhoto] = useState<EditablePhoto | null>(null);
+  const [initialPhoto, setInitialPhoto] = useState<EditablePhoto | null>(null);
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
 
   async function load() {
     try {
-      setPhoto(await api.getAdminPhoto(id));
+      const loaded = await api.getAdminPhoto(id);
+      setPhoto(loaded);
+      setInitialPhoto(loaded);
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load photo");
     }
@@ -23,11 +95,14 @@ export function AdminPhotoPage() {
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!photo) {
+    if (!photo || !initialPhoto) {
       return;
     }
     try {
-      await api.updatePhoto(photo.id, photo);
+      const payload = buildDirtyPayload(photo, initialPhoto);
+      const updated = Object.keys(payload).length ? await api.updatePhoto(photo.id, payload) : photo;
+      setPhoto(updated);
+      setInitialPhoto(updated);
       setSaved("Saved.");
       setError("");
     } catch (err) {
@@ -74,7 +149,23 @@ export function AdminPhotoPage() {
             <input value={photo.title} onChange={(event) => setPhoto({ ...photo, title: event.target.value })} />
           </label>
           <label>
+            Captured time
+            <span className="field-hint">
+              Edit in your current browser timezone. Saving updates the exact timestamp used for sorting and auto-generated intros.
+            </span>
+            <input
+              type="datetime-local"
+              step={60}
+              value={toLocalDateTimeInputValue(photo.capturedAt)}
+              onChange={(event) => setPhoto({ ...photo, capturedAt: fromLocalDateTimeInputValue(event.target.value) })}
+            />
+          </label>
+          <label>
             Description
+            <span className="field-hint">
+              Shared by exact GPS match. Saving here will sync the same intro to other photos at this location.
+            </span>
+            <span className="field-meta">Source: {descriptionSourceLabel(photo.descriptionSource)}</span>
             <textarea
               rows={6}
               value={photo.description}

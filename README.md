@@ -30,18 +30,20 @@ The public homepage is an interactive 3D globe.
   Supports mouse and touch interaction
 - 能看到海洋和陆地边界  
   Shows oceans and land boundaries
-- 有基础地势高低起伏  
-  Includes light terrain relief
+- 使用预烘焙地球底图和独立矢量海岸线 / 国境线  
+  Uses a prebaked earth texture plus separate vector coastlines and country borders
 - 照片按经纬度映射到地球表面  
   Maps photos onto the globe by latitude and longitude
 - 远景下显示聚合点  
   Shows cluster markers at distant zoom levels
-- 近景下展开为单张照片缩略图  
-  Expands into individual photo thumbnails at close zoom levels
+- 近景下按屏幕中心区域展开为单张照片缩略图，外围继续显示聚合点  
+  Expands into individual photo thumbnails near the center of the screen while keeping peripheral markers clustered
 - 桌面端支持 hover 放大缩略图  
   Supports hover enlargement for thumbnails on desktop
-- 点击照片后全屏显示大图和文字介绍  
-  Opens a full-screen lightbox with image and metadata on click
+- 点击照片后全屏显示大图和文字介绍，支持右上角关闭与图片填充切换  
+  Opens a full-screen lightbox with image, metadata, a top-right close button, and fit/fill controls
+- 地球上显示一组国际城市名称作为参考标注  
+  Shows a curated set of international city labels as geographic reference points
 
 用户浏览逻辑：  
 User browsing flow:
@@ -75,6 +77,8 @@ Implemented or currently in scope:
   Photo detail editor
 - 无 GPS 照片筛选  
   Missing-GPS filtering
+- 无地名照片筛选  
+  Missing-place-label filtering
 - 手动设置 GPS  
   Manual GPS editing
 - 根据地址联网搜索经纬度  
@@ -93,6 +97,10 @@ Implemented or currently in scope:
   Batch photo import
 - 永久清理已软删除照片  
   Permanent purge for soft-deleted photos
+- 单图详情页显示 GPS 反查地理信息  
+  Show reverse-geocoded location details on the single-photo detail page
+- 单图详情页可单独重生成同坐标组 AI 简介  
+  Regenerate the shared AI intro for one exact coordinate group from the single-photo detail page
 
 管理员操作逻辑：  
 Admin workflow:
@@ -105,8 +113,8 @@ Admin workflow:
    Review imported thumbnails
 4. 点击缩略图进入单图编辑  
    Open a photo editor
-5. 编辑标题、介绍、地点标签  
-   Edit title, description, and location label
+5. 编辑标题、介绍、地点标签、拍摄时间  
+   Edit title, description, location label, and capture time
    同坐标照片共用一段地点简介  
    Photos with the exact same coordinates share one location intro
 6. 对无 GPS 图片手动补点  
@@ -357,6 +365,7 @@ The first version uses a shared-location batch GPS mode:
 - `GET /api/admin/photos`
 - `GET /api/admin/photos/:id`
 - `PATCH /api/admin/photos/:id`
+- `POST /api/admin/photos/:id/regenerate-description`
 - `POST /api/admin/import-jobs`
 - `POST /api/admin/import-jobs/:id/files`
 - `POST /api/admin/photos/import`
@@ -568,6 +577,9 @@ Currently supported:
 - `ADMIN_PASSWORD`
 - `PORT`
 - `DATABASE_PATH`
+- `NARRATIVE_API_BASE_URL`
+- `NARRATIVE_API_KEY`
+- `NARRATIVE_MODEL`
 
 当前默认值：  
 Current defaults:
@@ -590,6 +602,10 @@ The current codebase already delivers a working first version, including:
   Public 3D globe browsing
 - 灯箱查看图片  
   Lightbox photo viewing
+- 右上角可折叠信息面板  
+  Collapsible top-right info panel
+- 左下角调试指标面板（含 FPS）  
+  Bottom-left debug metrics panel including FPS
 - 后台 CMS 登录  
   Admin CMS login
 - 批量导入照片  
@@ -606,6 +622,10 @@ The current codebase already delivers a working first version, including:
   Batch soft delete / restore / purge
 - 批量 GPS 设置  
   Batch GPS updates
+- 同坐标共享 AI 简介与后台手动同步  
+  Shared AI intros per exact coordinate group with manual sync from the admin editor
+- 单图详情页返回、地理摘要显示与单组 AI 重生成功能  
+  Detail-page back navigation, geo summary display, and per-group AI regeneration
 - SQLite 元数据存储  
   SQLite metadata storage
 - 轻量级导入任务进度与失败记录  

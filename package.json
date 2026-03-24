@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "db:bootstrap": "node --import tsx server/scripts/bootstrap-db.ts",
     "captured-at:backfill": "node --import tsx server/scripts/backfill-captured-at.ts",
+    "earth:prebake": "node --import tsx server/scripts/prebake-earth-textures.ts",
     "geo:backfill": "node --import tsx server/scripts/backfill-geo-summaries.ts",
     "narrative:backfill": "node --import tsx server/scripts/backfill-location-narratives.ts",
     "narrative:retry-report": "node --import tsx server/scripts/retry-location-narratives.ts",

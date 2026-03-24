@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, PhotoListItem } from "../lib/api";
 
 type EditablePhoto = PhotoListItem & {
@@ -72,11 +72,13 @@ function descriptionSourceLabel(source: PhotoListItem["descriptionSource"]) {
 
 export function AdminPhotoPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const [photo, setPhoto] = useState<EditablePhoto | null>(null);
   const [initialPhoto, setInitialPhoto] = useState<EditablePhoto | null>(null);
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
 
   async function load() {
     try {
@@ -132,6 +134,32 @@ export function AdminPhotoPage() {
     }
   }
 
+  async function regenerateNarrative() {
+    if (!photo) {
+      return;
+    }
+    try {
+      setRegenerating(true);
+      const result = await api.regenerateLocationNarrative(photo.id);
+      setPhoto(result.photo);
+      setInitialPhoto(result.photo);
+      setSaved(`AI intro regenerated for ${result.updatedCount} photo${result.updatedCount === 1 ? "" : "s"} in this location group.`);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI intro regeneration failed");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  function handleBack() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/admin");
+  }
+
   if (!photo) {
     return <main className="admin-shell panel">Loading...</main>;
   }
@@ -139,9 +167,13 @@ export function AdminPhotoPage() {
   return (
     <main className="admin-shell">
       <form className="edit-layout" onSubmit={onSave}>
-        <section className="panel">
-          <Link to="/admin">Back to CMS</Link>
+        <section className="panel edit-sidebar">
           <img src={photo.thumbnailUrl} alt={photo.title} className="edit-preview" />
+          <div className="edit-sidebar-footer">
+            <button type="button" className="ghost-button" onClick={handleBack}>
+              Back
+            </button>
+          </div>
         </section>
         <section className="panel edit-form">
           <label>
@@ -175,6 +207,21 @@ export function AdminPhotoPage() {
           <label>
             Location label
             <input value={photo.locationLabel} onChange={(event) => setPhoto({ ...photo, locationLabel: event.target.value })} />
+          </label>
+          <label>
+            Resolved GPS location
+            <span className="field-meta">{photo.geoSummaryEn || "Location summary unavailable"}</span>
+            <span className="field-hint">
+              {photo.hasGeo
+                ? [
+                    photo.geoLocalityEn,
+                    photo.geoRegionEn,
+                    photo.geoCountryEn
+                  ]
+                    .filter(Boolean)
+                    .join(" / ") || "Reverse geocoding has not filled region details yet."
+                : "This photo does not have GPS coordinates yet."}
+            </span>
           </label>
           <div className="grid-two">
             <label>
@@ -217,8 +264,11 @@ export function AdminPhotoPage() {
               <option value="hidden">hidden</option>
             </select>
           </label>
-          <div className="inline-row">
+          <div className="edit-actions">
             <button type="submit">Save changes</button>
+            <button type="button" className="ghost-button" onClick={() => void regenerateNarrative()} disabled={!photo.hasGeo || regenerating}>
+              {regenerating ? "Regenerating..." : "Regenerate AI intro"}
+            </button>
             {saved ? <span>{saved}</span> : null}
             {error ? <span className="error">{error}</span> : null}
           </div>

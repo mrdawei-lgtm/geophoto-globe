@@ -166,6 +166,19 @@ export function createAdminRouter({
     res.json(updated);
   });
 
+  router.post("/photos/:id/regenerate-description", requireAdmin, async (req, res) => {
+    try {
+      const result = await photoService.regenerateLocationNarrativeForPhoto(String(req.params.id));
+      if (!result?.photo) {
+        res.status(404).json({ error: "Photo not found" });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to regenerate AI intro" });
+    }
+  });
+
   router.post("/import-jobs", requireAdmin, (req, res) => {
     const filenames = Array.isArray(req.body?.filenames)
       ? req.body.filenames.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)

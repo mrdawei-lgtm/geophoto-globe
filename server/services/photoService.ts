@@ -338,6 +338,40 @@ export class PhotoService {
     return updated;
   }
 
+  async regenerateLocationNarrativeForPhoto(id: string) {
+    const current = this.photoRepository.getById(id);
+    if (!current) {
+      return null;
+    }
+    if (current.latitude === null || current.longitude === null) {
+      throw new Error("Photo must have GPS coordinates before regenerating an AI intro");
+    }
+
+    const group = this.listCoordinateGroup(current.latitude, current.longitude);
+    if (!group.length) {
+      throw new Error("No photos found for this coordinate group");
+    }
+
+    const generation = await this.locationNarrativeService.generateDetailedForPhotos(group);
+    const description = normalizeDescription(generation.description);
+    if (!description) {
+      throw new Error(generation.error || "AI intro generation returned empty text");
+    }
+
+    const updatedGroup = this.photoRepository.batchUpdate(
+      group.map((photo) => photo.id),
+      {
+        description,
+        descriptionSource: "auto"
+      }
+    );
+
+    return {
+      photo: this.findUpdatedPhoto(updatedGroup, id),
+      updatedCount: updatedGroup.length
+    };
+  }
+
   batchVisibility(ids: string[], visibilityStatus: VisibilityStatus) {
     return this.photoRepository.batchUpdate(ids, { visibilityStatus });
   }

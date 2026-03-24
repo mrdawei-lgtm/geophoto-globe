@@ -27,7 +27,7 @@ function formatGeoPrimaryLabel(label: string) {
 
 function formatCapturedDate(value: string | null) {
   if (!value) {
-    return "Capture date unavailable";
+    return "----/--/--";
   }
 
   return new Date(value).toLocaleDateString();
@@ -64,9 +64,10 @@ export function PublicGlobePage() {
   const [selected, setSelected] = useState<PublicPhotoGroup | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [error, setError] = useState("");
-  const [panelOpen, setPanelOpen] = useState(tier !== "mobile");
+  const [panelOpen, setPanelOpen] = useState(false);
   const [cameraDistance, setCameraDistance] = useState(4.7);
   const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
+  const [framesPerSecond, setFramesPerSecond] = useState(0);
   const [imageFillMode, setImageFillMode] = useState(false);
   const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -75,10 +76,6 @@ export function PublicGlobePage() {
 
   const baseDistance = 4.7;
   const zoomFactor = baseDistance / cameraDistance;
-
-  useEffect(() => {
-    setPanelOpen(tier !== "mobile");
-  }, [tier]);
 
   useEffect(() => {
     setCameraDistance(baseDistance);
@@ -188,11 +185,13 @@ export function PublicGlobePage() {
             onModeChange={setMode}
             onCameraDistanceChange={setCameraDistance}
             onEarthPixelDiameterChange={setEarthPixelDiameter}
+            onFramesPerSecondChange={setFramesPerSecond}
             onSelect={openPhoto}
           />
         </div>
       </section>
       <div className="globe-debug-panel" aria-live="polite">
+        <span>FPS {framesPerSecond ? Math.round(framesPerSecond) : "--"}</span>
         <span>Zoom x{zoomFactor.toFixed(2)}</span>
         <span>Distance {cameraDistance.toFixed(2)}</span>
         <span>Earth {earthPixelDiameter.toFixed(0)}px</span>
@@ -239,6 +238,16 @@ export function PublicGlobePage() {
                   </button>
                 </>
               ) : null}
+              <button
+                type="button"
+                className="lightbox-close-button"
+                onClick={closeLightbox}
+                aria-label="Close preview"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
               <button
                 type="button"
                 className="lightbox-zoom-button"

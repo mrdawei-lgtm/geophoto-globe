@@ -2,6 +2,33 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.9 - 2026-03-25
+
+### Added
+
+- Added more globe city labels across East Asia, Europe, North America, Africa, South America, and West Asia, including `Hong Kong`, `Toronto`, `Florence`, `Lisbon`, `Barcelona`, `Lagos`, and `Sao Paulo`
+- Added a lightbox close button in the top-right corner of the public viewer
+- Added FPS reporting to the public debug panel
+- Added reverse-geocoded GPS summary display to the admin photo detail page
+- Added an admin endpoint and detail-page action to regenerate the shared AI intro for a single exact coordinate group
+
+### Changed
+
+- Changed the public info panel to start collapsed by default instead of opening automatically
+- Changed public globe rendering to use a smooth sphere with prebaked texture plus vector coastlines and borders rather than runtime-drawn terrain relief
+- Changed city labels so they sit directly on the globe surface instead of floating above it, and removed the connector lines
+- Changed public thumbnail display so only the central projected region of the visible globe expands into thumbnails while peripheral visible photos stay clustered until zoomed in further
+- Changed the thumbnail/cluster switch distance from `3.0` to `3.5`
+- Changed ultra-close zoom behavior so visible front-hemisphere photos all expand into thumbnails at distance `<= 1.7`
+- Changed cluster marker sizing to reduce visual weight at smaller zoom levels
+- Changed the admin detail-page secondary action from `Cancel` to a history-aware `Back` button placed at the lower-left of the sidebar
+- Changed public missing capture-date fallback text from `Capture date unavailable` to `----/--/--`
+
+### Fixed
+
+- Fixed the central thumbnail-region calculation so it now follows the globe's actual projected screen size instead of drifting with longitude or camera bearing
+- Fixed city-label orientation so text is aligned to the globe's local tangent plane rather than appearing upright or detached from the sphere
+
 ## 0.1.8 - 2026-03-24
 
 ### Added

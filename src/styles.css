@@ -296,6 +296,10 @@ select {
 .globe-debug-panel span:last-child {
   color: rgba(220, 236, 245, 0.76);
 }
+
+.globe-debug-panel span:first-child {
+  color: #8fcbff;
+}
 .admin-toolbar,
 .inline-row,
 .grid-two,
@@ -482,6 +486,21 @@ button.danger {
   align-items: start;
 }
 
+.edit-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 100%;
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.edit-sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .edit-form {
   padding: 1rem;
 }
@@ -509,6 +528,13 @@ button.danger {
 .inline-row {
   grid-template-columns: 1fr auto;
   align-items: center;
+}
+
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .grid-two {
@@ -650,6 +676,23 @@ button.danger {
   color: #dcecf5;
 }
 
+.lightbox-close-button {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1;
+  width: 2.8rem;
+  height: 2.8rem;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(164, 201, 230, 0.22);
+  background: rgba(6, 17, 26, 0.78);
+  color: #dcecf5;
+}
+
+.lightbox-close-button svg,
 .lightbox-zoom-button svg {
   width: 1.1rem;
   height: 1.1rem;
@@ -870,6 +913,13 @@ button.danger {
   .lightbox-zoom-button {
     right: 0.75rem;
     bottom: 0.75rem;
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .lightbox-close-button {
+    top: 0.75rem;
+    right: 0.75rem;
     width: 2.5rem;
     height: 2.5rem;
   }

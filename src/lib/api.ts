@@ -9,6 +9,10 @@ export type PhotoListItem = {
   longitude: number | null;
   hasGeo: boolean;
   locationLabel: string;
+  geoCountryEn: string;
+  geoRegionEn: string;
+  geoLocalityEn: string;
+  geoSummaryEn: string;
   visibilityStatus: "visible" | "hidden";
   deletedAt: string | null;
 };
@@ -95,6 +99,12 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(payload) },
       true
     );
+  },
+  regenerateLocationNarrative(id: string) {
+    return request<{
+      photo: PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string };
+      updatedCount: number;
+    }>(`/api/admin/photos/${id}/regenerate-description`, { method: "POST" }, true);
   },
   createImportJob(filenames: string[]) {
     return request<ImportJob>(

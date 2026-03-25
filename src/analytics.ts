@@ -41,3 +41,12 @@ export function trackPageView(path: string) {
     page_title: document.title
   });
 }
+
+export function trackEvent(eventName: string, params: Record<string, string | number | boolean>) {
+  if (!measurementId || typeof window === "undefined" || window.location.pathname.startsWith("/admin")) {
+    return;
+  }
+
+  loadAnalytics();
+  window.gtag?.("event", eventName, params);
+}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { trackEvent } from "../analytics";
 import { GlobeScene } from "../components/GlobeScene";
 import { api } from "../lib/api";
 import { useDeviceTier } from "../lib/device";
@@ -150,6 +151,19 @@ export function PublicGlobePage() {
 
   const currentPhoto = selected?.groupItems[activeIndex] ?? null;
 
+  useEffect(() => {
+    if (!selected || !currentPhoto) {
+      return;
+    }
+
+    trackEvent("lightbox_photo_view", {
+      photo_id: currentPhoto.id,
+      photo_title: currentPhoto.title || "(untitled)",
+      group_index: activeIndex + 1,
+      group_count: selected.groupCount
+    });
+  }, [activeIndex, currentPhoto, selected]);
+
   function closeLightbox() {
     setSelected(null);
     setActiveIndex(0);
@@ -174,6 +188,22 @@ export function PublicGlobePage() {
     const frameRatio = frame.clientWidth / frame.clientHeight;
     const imageRatio = image.naturalWidth / image.naturalHeight;
     setFillScrollAxis(imageRatio >= frameRatio ? "x" : "y");
+  }
+
+  function toggleImageFillMode() {
+    if (!currentPhoto) {
+      return;
+    }
+
+    setImageFillMode((value) => {
+      const nextValue = !value;
+      trackEvent("lightbox_fill_mode_toggle", {
+        photo_id: currentPhoto.id,
+        photo_title: currentPhoto.title || "(untitled)",
+        fill_mode: nextValue ? "fill" : "fit"
+      });
+      return nextValue;
+    });
   }
 
   return (
@@ -271,7 +301,7 @@ export function PublicGlobePage() {
               <button
                 type="button"
                 className="lightbox-zoom-button"
-                onClick={() => setImageFillMode((value) => !value)}
+                onClick={toggleImageFillMode}
                 aria-pressed={imageFillMode}
                 aria-label={imageFillMode ? "Fit image to frame" : "Fill image frame"}
               >

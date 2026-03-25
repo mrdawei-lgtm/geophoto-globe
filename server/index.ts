@@ -56,9 +56,15 @@ app.use((error: unknown, _req: express.Request, res: express.Response, next: exp
 });
 
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(appRoot, "dist")));
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(appRoot, "dist", "index.html"));
+  const distPath = path.join(appRoot, "dist");
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/storage")) {
+      next();
+      return;
+    }
+
+    res.sendFile(path.join(distPath, "index.html"));
   });
 }
 

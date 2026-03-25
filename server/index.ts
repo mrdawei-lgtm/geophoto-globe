@@ -66,6 +66,10 @@ if (bootstrap.imported > 0) {
   console.log(`Imported ${bootstrap.imported} photo record(s) from legacy JSON into SQLite`);
 }
 
+if (bootstrap.normalizedAssetPaths > 0) {
+  console.log(`Normalized storage paths for ${bootstrap.normalizedAssetPaths} photo record(s)`);
+}
+
 app.listen(port, () => {
   console.log(`GeoPhoto Globe server listening on http://localhost:${port}`);
 });

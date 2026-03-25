@@ -1,5 +1,6 @@
 import type { SQLInputValue } from "node:sqlite";
 import { getDb } from "../db/client.js";
+import { normalizeStoredAssetPath } from "../storagePaths.js";
 import type { PhotoListFilters, PhotoRecord } from "../types.js";
 import type { DescriptionSource } from "../types.js";
 
@@ -10,6 +11,7 @@ type PhotoRow = {
   thumbnail_url: string;
   display_image_url: string;
   title: string;
+  narrative_prompt: string;
   description: string;
   description_source: DescriptionSource;
   captured_at: string | null;
@@ -32,11 +34,12 @@ type PhotoRow = {
 function mapPhotoRow(row: PhotoRow): PhotoRecord {
   return {
     id: row.id,
-    originalAssetPath: row.original_asset_path,
-    managedAssetPath: row.managed_asset_path,
+    originalAssetPath: normalizeStoredAssetPath(row.original_asset_path),
+    managedAssetPath: normalizeStoredAssetPath(row.managed_asset_path),
     thumbnailUrl: row.thumbnail_url,
     displayImageUrl: row.display_image_url,
     title: row.title,
+    narrativePrompt: row.narrative_prompt,
     description: row.description,
     descriptionSource: row.description_source,
     capturedAt: row.captured_at,
@@ -60,11 +63,12 @@ function mapPhotoRow(row: PhotoRow): PhotoRecord {
 function mapPhotoParams(record: PhotoRecord) {
   return {
     id: record.id,
-    originalAssetPath: record.originalAssetPath,
-    managedAssetPath: record.managedAssetPath,
+    originalAssetPath: normalizeStoredAssetPath(record.originalAssetPath),
+    managedAssetPath: normalizeStoredAssetPath(record.managedAssetPath),
     thumbnailUrl: record.thumbnailUrl,
     displayImageUrl: record.displayImageUrl,
     title: record.title,
+    narrativePrompt: record.narrativePrompt ?? "",
     description: record.description,
     descriptionSource: record.descriptionSource,
     capturedAt: record.capturedAt,
@@ -148,6 +152,7 @@ export class PhotoRepository {
         thumbnail_url,
         display_image_url,
         title,
+        narrative_prompt,
         description,
         description_source,
         captured_at,
@@ -172,6 +177,7 @@ export class PhotoRepository {
         @thumbnailUrl,
         @displayImageUrl,
         @title,
+        @narrativePrompt,
         @description,
         @descriptionSource,
         @capturedAt,
@@ -196,6 +202,7 @@ export class PhotoRepository {
         thumbnail_url = excluded.thumbnail_url,
         display_image_url = excluded.display_image_url,
         title = excluded.title,
+        narrative_prompt = excluded.narrative_prompt,
         description = excluded.description,
         description_source = excluded.description_source,
         captured_at = excluded.captured_at,

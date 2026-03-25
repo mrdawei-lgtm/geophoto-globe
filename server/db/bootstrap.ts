@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
-import { legacyPhotosJsonPath, storageRoot } from "../config.js";
+import { legacyPhotosJsonPath } from "../config.js";
+import { normalizeStoredAssetPath } from "../storagePaths.js";
 import type { DescriptionSource } from "../types.js";
 import type { PhotoRecord } from "../types.js";
 import { getDb } from "./client.js";
@@ -10,32 +10,15 @@ type LegacyPhotoStore = {
   photos: PhotoRecord[];
 };
 
-function normalizeAssetPath(assetPath: string) {
-  if (!assetPath) {
-    return assetPath;
-  }
-
-  if (assetPath.startsWith(storageRoot)) {
-    return assetPath;
-  }
-
-  const marker = `${path.sep}storage${path.sep}`;
-  const markerIndex = assetPath.lastIndexOf(marker);
-  if (markerIndex < 0) {
-    return assetPath;
-  }
-
-  return path.join(storageRoot, assetPath.slice(markerIndex + marker.length));
-}
-
 function normalizePhoto(record: PhotoRecord): PhotoRecord {
   const description = record.description ?? "";
   const descriptionSource: DescriptionSource =
     record.descriptionSource ?? (description.trim() ? "manual" : "none");
   return {
     ...record,
-    originalAssetPath: normalizeAssetPath(record.originalAssetPath),
-    managedAssetPath: normalizeAssetPath(record.managedAssetPath),
+    originalAssetPath: normalizeStoredAssetPath(record.originalAssetPath),
+    managedAssetPath: normalizeStoredAssetPath(record.managedAssetPath),
+    narrativePrompt: record.narrativePrompt ?? "",
     description,
     descriptionSource,
     geoCountryEn: record.geoCountryEn ?? "",
@@ -61,10 +44,11 @@ function importLegacyJsonIfNeeded() {
       original_asset_path,
       managed_asset_path,
       thumbnail_url,
-      display_image_url,
-      title,
-      description,
-      description_source,
+        display_image_url,
+        title,
+        narrative_prompt,
+        description,
+        description_source,
       captured_at,
       latitude,
       longitude,
@@ -87,6 +71,7 @@ function importLegacyJsonIfNeeded() {
       @thumbnailUrl,
       @displayImageUrl,
       @title,
+      @narrativePrompt,
       @description,
       @descriptionSource,
       @capturedAt,
@@ -123,6 +108,42 @@ function importLegacyJsonIfNeeded() {
   return { imported: photos.length };
 }
 
+function normalizeStoredPhotoAssetPaths() {
+  const db = getDb();
+  const rows = db.prepare("SELECT id, original_asset_path, managed_asset_path FROM photos").all() as Array<{
+    id: string;
+    original_asset_path: string;
+    managed_asset_path: string;
+  }>;
+  const update = db.prepare(`
+    UPDATE photos
+    SET original_asset_path = ?,
+        managed_asset_path = ?
+    WHERE id = ?
+  `);
+
+  let normalized = 0;
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      const nextOriginal = normalizeStoredAssetPath(row.original_asset_path);
+      const nextManaged = normalizeStoredAssetPath(row.managed_asset_path);
+      if (nextOriginal === row.original_asset_path && nextManaged === row.managed_asset_path) {
+        continue;
+      }
+
+      update.run(nextOriginal, nextManaged, row.id);
+      normalized += 1;
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return normalized;
+}
+
 function recoverInterruptedImportItems() {
   const db = getDb();
   const now = new Date().toISOString();
@@ -138,5 +159,10 @@ function recoverInterruptedImportItems() {
 export function bootstrapDatabase() {
   migrateDatabase();
   recoverInterruptedImportItems();
-  return importLegacyJsonIfNeeded();
+  const imported = importLegacyJsonIfNeeded();
+  const normalizedAssetPaths = normalizeStoredPhotoAssetPaths();
+  return {
+    ...imported,
+    normalizedAssetPaths
+  };
 }

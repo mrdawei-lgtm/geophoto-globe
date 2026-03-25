@@ -129,14 +129,6 @@ export async function parseMetadata(filePath: string): Promise<ParsedMetadata> {
   };
 }
 
-export async function writeGpsToManagedExif(filePath: string, latitude: number, longitude: number) {
-  await exiftool.write(filePath, {
-    GPSLatitude: latitude,
-    GPSLongitude: longitude,
-    GPSCoordinates: `${latitude}, ${longitude}`
-  });
-}
-
 export function toPublicPath(filePath: string) {
   const relative = path.relative(appRoot, filePath).split(path.sep).join("/");
   return `/${relative}`;

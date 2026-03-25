@@ -1,7 +1,22 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const appRootCandidate = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+function resolveAppRoot() {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [path.resolve(moduleDir, ".."), path.resolve(moduleDir, "../..")];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "package.json"))) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
+const appRootCandidate = resolveAppRoot();
 
 try {
   process.loadEnvFile(path.join(appRootCandidate, ".env"));

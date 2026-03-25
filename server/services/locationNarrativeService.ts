@@ -8,6 +8,7 @@ type LocationNarrativeContext = {
   longitude: number;
   locationLabel: string;
   geoSummaryEn: string;
+  customPrompt: string;
   photoCount: number;
   timeZone: string;
   captureRangeText: string;
@@ -101,6 +102,13 @@ function chooseMostCommon(values: Array<string | null | undefined>) {
   return winner;
 }
 
+function chooseLatestNarrativePrompt(photos: PhotoRecord[]) {
+  return [...photos]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .map((photo) => photo.narrativePrompt?.trim() ?? "")
+    .find(Boolean) ?? "";
+}
+
 function monthToSeason(month: number) {
   if (month >= 3 && month <= 5) {
     return "春";
@@ -188,6 +196,7 @@ function buildNarrativeContext(photos: PhotoRecord[]): LocationNarrativeContext 
     longitude: anchor.longitude,
     locationLabel: chooseMostCommon(withGeo.map((photo) => photo.locationLabel)),
     geoSummaryEn: chooseMostCommon(withGeo.map((photo) => photo.geoSummaryEn)),
+    customPrompt: chooseLatestNarrativePrompt(withGeo),
     photoCount: withGeo.length,
     timeZone,
     captureRangeText:
@@ -257,6 +266,7 @@ class OpenAICompatibleNarrativeGenerator implements LocationNarrativeGenerator {
               `英文地理摘要: ${context.geoSummaryEn || "未知"}`,
               `坐标: ${context.latitude}, ${context.longitude}`,
               `照片数量: ${context.photoCount}`,
+              context.customPrompt ? `个性化提示词: ${context.customPrompt}` : "",
               `拍摄地时区: ${context.timeZone}`,
               `拍摄日期范围: ${context.captureRangeText}`,
               `年份线索: ${context.yearHintText}`,

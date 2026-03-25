@@ -150,6 +150,7 @@ export function createAdminRouter({
 
     const updated = await photoService.updatePhoto(String(req.params.id), {
       title: hasOwn(body, "title") ? String(req.body.title ?? "") : undefined,
+      narrativePrompt: hasOwn(body, "narrativePrompt") ? String(req.body.narrativePrompt ?? "") : undefined,
       description: hasOwn(body, "description") ? String(req.body.description ?? "") : undefined,
       capturedAt,
       locationLabel: hasOwn(body, "locationLabel") ? String(req.body.locationLabel ?? "") : undefined,
@@ -243,13 +244,41 @@ export function createAdminRouter({
   router.post("/photos/batch/gps", requireAdmin, async (req, res) => {
     const latitude = Number(req.body.latitude);
     const longitude = Number(req.body.longitude);
-    const items = await photoService.batchGps(
+    const result = await photoService.batchGps(
       readIds(req.body.ids),
       latitude,
       longitude,
-      String(req.body.locationLabel || "")
+      String(req.body.locationLabel || ""),
+      String(req.body.narrativePrompt || "")
     );
-    res.json({ items });
+    res.json(result);
+  });
+
+  router.post("/photos/batch/gps/regenerate", requireAdmin, async (req, res) => {
+    const latitude = Number(req.body.latitude);
+    const longitude = Number(req.body.longitude);
+    const result = await photoService.regenerateBatchGpsNarrative(
+      readIds(req.body.ids),
+      latitude,
+      longitude,
+      String(req.body.locationLabel || ""),
+      String(req.body.narrativePrompt || "")
+    );
+    res.json(result);
+  });
+
+  router.post("/photos/batch/gps/description", requireAdmin, (req, res) => {
+    const latitude = Number(req.body.latitude);
+    const longitude = Number(req.body.longitude);
+    const result = photoService.saveBatchGpsNarrative(
+      readIds(req.body.ids),
+      latitude,
+      longitude,
+      String(req.body.locationLabel || ""),
+      String(req.body.description || ""),
+      String(req.body.narrativePrompt || "")
+    );
+    res.json(result);
   });
 
   router.get("/import-jobs", requireAdmin, (_req, res) => {

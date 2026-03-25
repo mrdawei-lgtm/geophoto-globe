@@ -1,12 +1,13 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, ImportJob, PhotoListItem } from "../lib/api";
+import { api, ImportJob, PhotoListItem, SharedNarrativePreview } from "../lib/api";
 
 type GeoFilter = "all" | "missing" | "attached";
 type LocationLabelFilter = "all" | "missing" | "present";
 type VisibilityFilter = "all" | "hidden" | "visible";
 type DeletedFilter = "all" | "deleted" | "active";
 type GpsMode = "coordinates" | "address";
+type GpsProgressStage = "idle" | "resolving" | "saving" | "generating" | "complete";
 type UploadItemStatus = "queued" | "uploading" | "processing" | "success" | "failed";
 
 type UploadQueueItem = {
@@ -49,10 +50,15 @@ export function AdminListPage() {
   const [longitudeInput, setLongitudeInput] = useState("");
   const [addressInput, setAddressInput] = useState("");
   const [locationLabelInput, setLocationLabelInput] = useState("");
+  const [narrativePromptInput, setNarrativePromptInput] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsProgressStage, setGpsProgressStage] = useState<GpsProgressStage>("idle");
+  const [gpsProgressPercent, setGpsProgressPercent] = useState(0);
+  const [gpsResult, setGpsResult] = useState<SharedNarrativePreview | null>(null);
   const [uploadItems, setUploadItems] = useState<UploadQueueItem[]>([]);
   const [uploadJob, setUploadJob] = useState<ImportJob | null>(null);
   const [uploadRunning, setUploadRunning] = useState(false);
+  const gpsProgressTimerRef = useRef<number | null>(null);
 
   async function load() {
     try {
@@ -317,13 +323,46 @@ export function AdminListPage() {
   }
 
   function closeGpsDialog() {
+    if (gpsProgressTimerRef.current !== null) {
+      window.clearInterval(gpsProgressTimerRef.current);
+      gpsProgressTimerRef.current = null;
+    }
     setGpsDialogOpen(false);
     setGpsMode("coordinates");
     setLatitudeInput("");
     setLongitudeInput("");
     setAddressInput("");
     setLocationLabelInput("");
+    setNarrativePromptInput("");
     setGpsLoading(false);
+    setGpsProgressStage("idle");
+    setGpsProgressPercent(0);
+    setGpsResult(null);
+  }
+
+  function beginGpsProgress(stage: GpsProgressStage, startPercent: number) {
+    if (gpsProgressTimerRef.current !== null) {
+      window.clearInterval(gpsProgressTimerRef.current);
+    }
+    setGpsProgressStage(stage);
+    setGpsProgressPercent(startPercent);
+    gpsProgressTimerRef.current = window.setInterval(() => {
+      setGpsProgressPercent((current) => Math.min(current + Math.max(1, (92 - current) / 8), 92));
+    }, 420);
+  }
+
+  function advanceGpsProgress(stage: GpsProgressStage, nextPercent: number) {
+    setGpsProgressStage(stage);
+    setGpsProgressPercent((current) => Math.max(current, nextPercent));
+  }
+
+  function finishGpsProgress() {
+    if (gpsProgressTimerRef.current !== null) {
+      window.clearInterval(gpsProgressTimerRef.current);
+      gpsProgressTimerRef.current = null;
+    }
+    setGpsProgressStage("complete");
+    setGpsProgressPercent(100);
   }
 
   async function submitGpsBatch() {
@@ -334,16 +373,19 @@ export function AdminListPage() {
     try {
       setError("");
       setGpsLoading(true);
+      setGpsResult(null);
       let latitude = 0;
       let longitude = 0;
       let locationLabel = locationLabelInput.trim();
       if (gpsMode === "coordinates") {
+        beginGpsProgress("saving", 18);
         latitude = Number(latitudeInput.trim());
         longitude = Number(longitudeInput.trim());
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
           throw new Error("Latitude and longitude must be valid numbers");
         }
       } else {
+        beginGpsProgress("resolving", 12);
         const query = addressInput.trim();
         if (!query) {
           throw new Error("Address is required");
@@ -358,15 +400,101 @@ export function AdminListPage() {
         if (!locationLabel) {
           locationLabel = first.displayName;
         }
+        advanceGpsProgress("saving", 40);
       }
-      await api.batchGps(selected, latitude, longitude, locationLabel);
+      advanceGpsProgress("generating", 68);
+      const result = await api.batchGps(
+        selected,
+        latitude,
+        longitude,
+        locationLabel,
+        narrativePromptInput.trim()
+      );
+      finishGpsProgress();
+      setGpsResult(result.narrative);
+      setLocationLabelInput(result.narrative?.locationLabel ?? locationLabel);
+      setNarrativePromptInput(result.narrative?.narrativePrompt ?? narrativePromptInput.trim());
       setNotice(`GPS updated for ${selected.length} photo(s).`);
-      setSelected([]);
-      closeGpsDialog();
       await load();
-    } catch (err) {
       setGpsLoading(false);
+    } catch (err) {
+      if (gpsProgressTimerRef.current !== null) {
+        window.clearInterval(gpsProgressTimerRef.current);
+        gpsProgressTimerRef.current = null;
+      }
+      setGpsLoading(false);
+      setGpsProgressStage("idle");
+      setGpsProgressPercent(0);
       setError(err instanceof Error ? err.message : "Batch GPS update failed");
+    }
+  }
+
+  async function rerunGpsNarrative() {
+    if (!gpsResult || !selected.length) {
+      return;
+    }
+    try {
+      setError("");
+      setGpsLoading(true);
+      beginGpsProgress("generating", 56);
+      const result = await api.regenerateBatchGpsNarrative(
+        selected,
+        gpsResult.latitude,
+        gpsResult.longitude,
+        locationLabelInput.trim() || gpsResult.locationLabel,
+        narrativePromptInput.trim()
+      );
+      finishGpsProgress();
+      setGpsResult(result.narrative);
+      setLocationLabelInput(result.narrative?.locationLabel ?? (locationLabelInput.trim() || gpsResult.locationLabel));
+      setNarrativePromptInput(result.narrative?.narrativePrompt ?? narrativePromptInput.trim());
+      setNotice(`AI intro regenerated for ${result.narrative?.photoCount ?? selected.length} photo(s).`);
+      await load();
+      setGpsLoading(false);
+    } catch (err) {
+      if (gpsProgressTimerRef.current !== null) {
+        window.clearInterval(gpsProgressTimerRef.current);
+        gpsProgressTimerRef.current = null;
+      }
+      setGpsLoading(false);
+      setGpsProgressStage("idle");
+      setGpsProgressPercent(0);
+      setError(err instanceof Error ? err.message : "AI intro regeneration failed");
+    }
+  }
+
+  async function saveGpsNarrativeManually() {
+    if (!gpsResult || !selected.length) {
+      return;
+    }
+    try {
+      setError("");
+      setGpsLoading(true);
+      beginGpsProgress("saving", 52);
+      const result = await api.saveBatchGpsNarrative(
+        selected,
+        gpsResult.latitude,
+        gpsResult.longitude,
+        locationLabelInput.trim() || gpsResult.locationLabel,
+        gpsResult.description,
+        narrativePromptInput.trim()
+      );
+      finishGpsProgress();
+      setGpsResult(result.narrative);
+      setLocationLabelInput(result.narrative?.locationLabel ?? (locationLabelInput.trim() || gpsResult.locationLabel));
+      setNarrativePromptInput(result.narrative?.narrativePrompt ?? narrativePromptInput.trim());
+      setNotice(`Manual intro saved for ${result.narrative?.photoCount ?? selected.length} photo(s).`);
+      await load();
+      setGpsLoading(false);
+    } catch (err) {
+      if (gpsProgressTimerRef.current !== null) {
+        window.clearInterval(gpsProgressTimerRef.current);
+        gpsProgressTimerRef.current = null;
+      }
+      setGpsLoading(false);
+      setGpsProgressStage("idle");
+      setGpsProgressPercent(0);
+      setError(err instanceof Error ? err.message : "Manual intro save failed");
     }
   }
 
@@ -561,13 +689,80 @@ export function AdminListPage() {
                 placeholder="Optional display label"
               />
             </label>
+            <label>
+              Personalized prompt
+              <textarea
+                rows={4}
+                value={narrativePromptInput}
+                onChange={(event) => setNarrativePromptInput(event.target.value)}
+                placeholder="Optional guidance for this location group's AI intro"
+              />
+            </label>
+            {(gpsLoading || gpsProgressStage === "complete") && gpsProgressStage !== "idle" ? (
+              <div className="gps-progress-card">
+                <div className="gps-progress-header">
+                  <strong>
+                    {gpsProgressStage === "resolving"
+                      ? "Resolving address"
+                      : gpsProgressStage === "saving"
+                        ? "Saving GPS"
+                        : gpsProgressStage === "generating"
+                          ? "Generating AI intro"
+                          : "Completed"}
+                  </strong>
+                  <span>{Math.round(gpsProgressPercent)}%</span>
+                </div>
+                <div className="gps-progress-bar">
+                  <span style={{ width: `${gpsProgressPercent}%` }} />
+                </div>
+                <p className="field-hint">
+                  {gpsProgressStage === "complete"
+                    ? "The latest backend result is ready below."
+                    : "The backend is updating GPS and resolving the shared intro for this coordinate group."}
+                </p>
+              </div>
+            ) : null}
+            {gpsResult ? (
+              <div className="gps-result-card">
+                <div className="gps-result-header">
+                  <strong>{gpsResult.locationLabel || "Shared intro result"}</strong>
+                  <span className="field-meta">
+                    {gpsResult.descriptionSource} · {gpsResult.photoCount} photo(s)
+                  </span>
+                </div>
+                {gpsResult.wasTruncated ? (
+                  <p className="error">This AI intro was truncated to fit the current 120-character limit.</p>
+                ) : null}
+                <label>
+                  Generated intro
+                  <textarea
+                    rows={6}
+                    value={gpsResult.description}
+                    onChange={(event) =>
+                      setGpsResult((current) => (current ? { ...current, description: event.target.value } : current))
+                    }
+                  />
+                </label>
+              </div>
+            ) : null}
             <div className="modal-actions">
               <button type="button" className="ghost-button" onClick={closeGpsDialog}>
-                Cancel
+                Close
               </button>
-              <button type="button" onClick={() => void submitGpsBatch()} disabled={gpsLoading}>
-                {gpsLoading ? "Saving..." : "Apply GPS"}
-              </button>
+              {!gpsResult ? (
+                <button type="button" onClick={() => void submitGpsBatch()} disabled={gpsLoading}>
+                  {gpsLoading ? "Saving..." : "Apply GPS"}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="ghost-button" onClick={() => void rerunGpsNarrative()} disabled={gpsLoading}>
+                    {gpsLoading ? "Working..." : "Rerun AI"}
+                  </button>
+                  <button type="button" onClick={() => void saveGpsNarrativeManually()} disabled={gpsLoading}>
+                    {gpsLoading ? "Saving..." : "Save intro"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </section>

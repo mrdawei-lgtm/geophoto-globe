@@ -823,6 +823,40 @@ button.danger {
   gap: 0.45rem;
 }
 
+.gps-progress-card,
+.gps-result-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: rgba(1, 12, 18, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gps-progress-header,
+.gps-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.gps-progress-bar {
+  width: 100%;
+  height: 0.45rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(164, 201, 230, 0.12);
+}
+
+.gps-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #7bd0ff, #d87d4a);
+  transition: width 180ms ease;
+}
+
 .ghost-button,
 .active-toggle {
   background: rgba(12, 30, 44, 0.68);

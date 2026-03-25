@@ -11,6 +11,8 @@ All notable changes to `GeoPhoto Globe` are recorded here.
 - Added FPS reporting to the public debug panel
 - Added reverse-geocoded GPS summary display to the admin photo detail page
 - Added an admin endpoint and detail-page action to regenerate the shared AI intro for a single exact coordinate group
+- Added a per-photo `narrativePrompt` field in the admin detail page so editors can provide personalized guidance for AI intro generation
+- Added a richer batch `Set GPS` workflow that shows backend progress, previews the generated intro, and allows rerun or manual save before closing the dialog
 
 ### Changed
 
@@ -23,6 +25,8 @@ All notable changes to `GeoPhoto Globe` are recorded here.
 - Changed cluster marker sizing to reduce visual weight at smaller zoom levels
 - Changed the admin detail-page secondary action from `Cancel` to a history-aware `Back` button placed at the lower-left of the sidebar
 - Changed public missing capture-date fallback text from `Capture date unavailable` to `----/--/--`
+- Changed location narrative generation so a coordinate group now prefers the latest non-empty personalized prompt within that group when sending context to the model
+- Changed batch GPS editing so applying coordinates no longer ends the flow immediately; the dialog now stays open to show generation state and the returned shared intro text
 
 ### Fixed
 

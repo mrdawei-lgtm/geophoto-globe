@@ -2,6 +2,7 @@ export type PhotoListItem = {
   id: string;
   thumbnailUrl: string;
   title: string;
+  narrativePrompt: string;
   description: string;
   descriptionSource: "none" | "auto" | "manual";
   capturedAt: string | null;
@@ -15,6 +16,19 @@ export type PhotoListItem = {
   geoSummaryEn: string;
   visibilityStatus: "visible" | "hidden";
   deletedAt: string | null;
+};
+
+export type SharedNarrativePreview = {
+  latitude: number;
+  longitude: number;
+  locationLabel: string;
+  narrativePrompt: string;
+  description: string;
+  descriptionSource: "none" | "auto" | "manual";
+  photoCount: number;
+  wasTruncated: boolean;
+  finishReason: string | null;
+  error: string | null;
 };
 
 export type PublicPhotoItem = {
@@ -198,10 +212,31 @@ export const api = {
       skippedCount: number;
     }>("/api/admin/photos/batch/purge-deleted", { method: "POST" }, true);
   },
-  batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string) {
-    return request(
+  batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string, narrativePrompt: string) {
+    return request<{ items: PhotoListItem[]; narrative: SharedNarrativePreview | null }>(
       "/api/admin/photos/batch/gps",
-      { method: "POST", body: JSON.stringify({ ids, latitude, longitude, locationLabel }) },
+      { method: "POST", body: JSON.stringify({ ids, latitude, longitude, locationLabel, narrativePrompt }) },
+      true
+    );
+  },
+  regenerateBatchGpsNarrative(ids: string[], latitude: number, longitude: number, locationLabel: string, narrativePrompt: string) {
+    return request<{ items: PhotoListItem[]; narrative: SharedNarrativePreview | null }>(
+      "/api/admin/photos/batch/gps/regenerate",
+      { method: "POST", body: JSON.stringify({ ids, latitude, longitude, locationLabel, narrativePrompt }) },
+      true
+    );
+  },
+  saveBatchGpsNarrative(
+    ids: string[],
+    latitude: number,
+    longitude: number,
+    locationLabel: string,
+    description: string,
+    narrativePrompt: string
+  ) {
+    return request<{ items: PhotoListItem[]; narrative: SharedNarrativePreview | null }>(
+      "/api/admin/photos/batch/gps/description",
+      { method: "POST", body: JSON.stringify({ ids, latitude, longitude, locationLabel, description, narrativePrompt }) },
       true
     );
   },

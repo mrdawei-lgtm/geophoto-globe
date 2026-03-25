@@ -38,6 +38,9 @@ function buildDirtyPayload(current: EditablePhoto, original: EditablePhoto) {
   if (current.title !== original.title) {
     payload.title = current.title;
   }
+  if (current.narrativePrompt !== original.narrativePrompt) {
+    payload.narrativePrompt = current.narrativePrompt;
+  }
   if (current.description !== original.description) {
     payload.description = current.description;
   }
@@ -202,6 +205,17 @@ export function AdminPhotoPage() {
               rows={6}
               value={photo.description}
               onChange={(event) => setPhoto({ ...photo, description: event.target.value })}
+            />
+          </label>
+          <label>
+            Prompt
+            <span className="field-hint">
+              Optional personalized guidance for AI intro generation. When this coordinate group regenerates, the latest non-empty prompt in the group is used first.
+            </span>
+            <textarea
+              rows={4}
+              value={photo.narrativePrompt}
+              onChange={(event) => setPhoto({ ...photo, narrativePrompt: event.target.value })}
             />
           </label>
           <label>

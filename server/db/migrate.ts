@@ -1,6 +1,6 @@
 import { getDb } from "./client.js";
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function hasColumn(tableName: string, columnName: string) {
   const db = getDb();
@@ -25,6 +25,7 @@ export function migrateDatabase() {
         thumbnail_url TEXT NOT NULL,
         display_image_url TEXT NOT NULL,
         title TEXT NOT NULL,
+        narrative_prompt TEXT NOT NULL DEFAULT '',
         description TEXT NOT NULL DEFAULT '',
         description_source TEXT NOT NULL DEFAULT 'none' CHECK (description_source IN ('none', 'auto', 'manual')),
         captured_at TEXT,
@@ -122,6 +123,12 @@ export function migrateDatabase() {
            AND TRIM(COALESCE(description, '')) <> ''
          )
     `);
+  }
+
+  if (currentVersion < 5) {
+    if (!hasColumn("photos", "narrative_prompt")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN narrative_prompt TEXT NOT NULL DEFAULT ''`);
+    }
   }
 
   db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);

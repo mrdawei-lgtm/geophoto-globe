@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Billboard, Html, OrbitControls, PerspectiveCamera, Text } from "@react-three/drei";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { mesh } from "topojson-client";
@@ -37,13 +37,24 @@ type CityLabel = {
 
 type ThumbnailOverlayItem = {
   id: string;
-  title: string;
-  thumbnailUrl: string;
+  kind: "photo" | "overflow";
   anchorX: number;
   anchorY: number;
   thumbX: number;
   thumbY: number;
-};
+} & (
+  | {
+      kind: "photo";
+      title: string;
+      photoId: string;
+      thumbnailUrl: string;
+    }
+  | {
+      kind: "overflow";
+      hiddenCount: number;
+      representativeId: string;
+    }
+);
 
 const CITY_LABELS: CityLabel[] = [
   { name: "Beijing", latitude: 39.9042, longitude: 116.4074, minDistance: 3.8 },
@@ -93,8 +104,10 @@ const CITY_LABELS: CityLabel[] = [
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const X_AXIS = new THREE.Vector3(1, 0, 0);
-const THUMBNAIL_SIZE = 58;
-const THUMBNAIL_MIN_SPACING = THUMBNAIL_SIZE / 2;
+const THUMBNAIL_SIZE = 54;
+const THUMBNAIL_MIN_SPACING = THUMBNAIL_SIZE * 0.8;
+const MAX_VISIBLE_THUMBNAILS_PER_COMPONENT = 12;
+const FULL_THUMBNAIL_EXPANSION_DISTANCE = 1.48;
 const MIN_CAMERA_DISTANCE = 1.33;
 const MAX_CAMERA_DISTANCE = 9;
 const ITEM_MODE_DISTANCE = 3.5;
@@ -311,9 +324,18 @@ function distance2d(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function thumbnailExpansionProgress(cameraDistance: number) {
+  return THREE.MathUtils.clamp(
+    (FULL_THUMBNAIL_DISTANCE - cameraDistance) / (FULL_THUMBNAIL_DISTANCE - FULL_THUMBNAIL_EXPANSION_DISTANCE),
+    0,
+    1
+  );
+}
+
 function resolveThumbnailLayout(
   items: Array<{ id: string; title: string; thumbnailUrl: string; anchorX: number; anchorY: number; baseX: number; baseY: number }>,
-  spacing: number
+  spacing: number,
+  maxVisibleThumbnails: number
 ) {
   const visited = new Set<number>();
   const components: number[][] = [];
@@ -344,7 +366,19 @@ function resolveThumbnailLayout(
   return components.flatMap((component) => {
     if (component.length === 1) {
       const item = items[component[0]];
-      return [{ ...item, thumbX: item.baseX, thumbY: item.baseY }];
+      return [
+        {
+          id: item.id,
+          kind: "photo" as const,
+          title: item.title,
+          photoId: item.id,
+          thumbnailUrl: item.thumbnailUrl,
+          anchorX: item.anchorX,
+          anchorY: item.anchorY,
+          thumbX: item.baseX,
+          thumbY: item.baseY
+        }
+      ];
     }
 
     const componentItems = component.map((index) => items[index]);
@@ -364,12 +398,41 @@ function resolveThumbnailLayout(
       .sort((left, right) => left.angle - right.angle)
       .map((entry) => entry.item);
 
-    const offsets = buildRadialOffsets(component.length, spacing);
-    return sortedItems.map((item, index) => ({
-      ...item,
+    const visibleCount = Number.isFinite(maxVisibleThumbnails)
+      ? Math.min(sortedItems.length, Math.max(1, Math.floor(maxVisibleThumbnails)))
+      : sortedItems.length;
+    const visibleItems = sortedItems.slice(0, visibleCount);
+    const hiddenItems = sortedItems.slice(visibleCount);
+    const layoutCount = visibleItems.length + (hiddenItems.length ? 1 : 0);
+    const offsets = buildRadialOffsets(layoutCount, spacing);
+
+    const positionedItems: ThumbnailOverlayItem[] = visibleItems.map((item, index) => ({
+      id: item.id,
+      kind: "photo",
+      title: item.title,
+      photoId: item.id,
+      thumbnailUrl: item.thumbnailUrl,
+      anchorX: item.anchorX,
+      anchorY: item.anchorY,
       thumbX: center.x + offsets[index].x,
       thumbY: center.y + offsets[index].y
     }));
+
+    if (hiddenItems.length) {
+      const overflowOffset = offsets[visibleItems.length];
+      positionedItems.push({
+        id: `overflow-${component[0]}`,
+        kind: "overflow",
+        hiddenCount: hiddenItems.length,
+        representativeId: hiddenItems[0].id,
+        anchorX: center.x,
+        anchorY: center.y,
+        thumbX: center.x + overflowOffset.x,
+        thumbY: center.y + overflowOffset.y
+      });
+    }
+
+    return positionedItems;
   });
 }
 
@@ -519,6 +582,12 @@ function ThumbnailOverlayLayer({
 }) {
   const { camera, size } = useThree();
   const [layout, setLayout] = useState<ThumbnailOverlayItem[]>([]);
+  const expansionProgress = thumbnailExpansionProgress(cameraDistance);
+  const thumbnailSize = THUMBNAIL_SIZE;
+  const thumbnailSpacing = THREE.MathUtils.lerp(THUMBNAIL_MIN_SPACING, THUMBNAIL_SIZE + 18, expansionProgress);
+  const maxVisibleThumbnails = cameraDistance <= FULL_THUMBNAIL_EXPANSION_DISTANCE
+    ? Number.POSITIVE_INFINITY
+    : MAX_VISIBLE_THUMBNAILS_PER_COMPONENT;
 
   useFrame(() => {
     const rotation = rotationRef.current;
@@ -555,7 +624,7 @@ function ThumbnailOverlayLayer({
       ];
     });
 
-    setLayout(resolveThumbnailLayout(visibleItems, THUMBNAIL_MIN_SPACING));
+    setLayout(resolveThumbnailLayout(visibleItems, thumbnailSpacing, maxVisibleThumbnails));
   });
 
   return (
@@ -575,17 +644,47 @@ function ThumbnailOverlayLayer({
           ))}
         </svg>
         {layout.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="globe-thumbnail-button"
-            style={{ left: `${item.thumbX}px`, top: `${item.thumbY}px` }}
-            onClick={() => onSelect(item.id)}
-            aria-label={item.title}
-            data-hover-enabled={hoverEnabled ? "true" : "false"}
-          >
-            <img src={item.thumbnailUrl} alt={item.title} draggable={false} />
-          </button>
+          item.kind === "photo" ? (
+            <button
+              key={item.id}
+              type="button"
+              className="globe-thumbnail-button"
+              style={
+                {
+                  left: `${item.thumbX}px`,
+                  top: `${item.thumbY}px`,
+                  width: `${thumbnailSize}px`,
+                  height: `${thumbnailSize}px`,
+                  "--thumbnail-size": `${thumbnailSize}px`
+                } as CSSProperties
+              }
+              onClick={() => onSelect(item.photoId)}
+              aria-label={item.title}
+              data-hover-enabled={hoverEnabled ? "true" : "false"}
+            >
+              <img src={item.thumbnailUrl} alt={item.title} draggable={false} />
+            </button>
+          ) : (
+            <button
+              key={item.id}
+              type="button"
+              className="globe-thumbnail-button globe-thumbnail-overflow-button"
+              style={
+                {
+                  left: `${item.thumbX}px`,
+                  top: `${item.thumbY}px`,
+                  width: `${thumbnailSize}px`,
+                  height: `${thumbnailSize}px`,
+                  "--thumbnail-size": `${thumbnailSize}px`
+                } as CSSProperties
+              }
+              onClick={() => onSelect(item.representativeId)}
+              aria-label={`Open one of ${item.hiddenCount} additional nearby photos`}
+              data-hover-enabled={hoverEnabled ? "true" : "false"}
+            >
+              {`+${item.hiddenCount}`}
+            </button>
+          )
         ))}
       </div>
     </Html>

@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ImportJob, PhotoListItem, SharedNarrativePreview } from "../lib/api";
+import { readPublicDebugPanelVisible, writePublicDebugPanelVisible } from "../lib/preferences";
 
 type GeoFilter = "all" | "missing" | "attached";
 type LocationLabelFilter = "all" | "missing" | "present";
@@ -58,6 +59,9 @@ export function AdminListPage() {
   const [uploadItems, setUploadItems] = useState<UploadQueueItem[]>([]);
   const [uploadJob, setUploadJob] = useState<ImportJob | null>(null);
   const [uploadRunning, setUploadRunning] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadDialogMinimized, setUploadDialogMinimized] = useState(false);
+  const [publicDebugPanelVisible, setPublicDebugPanelVisible] = useState(() => readPublicDebugPanelVisible());
   const gpsProgressTimerRef = useRef<number | null>(null);
 
   async function load() {
@@ -115,6 +119,52 @@ export function AdminListPage() {
     () => uploadItems.filter((item) => item.status === "queued").length,
     [uploadItems]
   );
+  const hasUploadSession = uploadItems.length > 0 || uploadJob !== null;
+  const showUploadDock = hasUploadSession && (uploadDialogMinimized || (uploadRunning && !uploadDialogOpen));
+  const uploadDockLabel = useMemo(() => {
+    if (uploadRunning) {
+      if (uploadSummary.uploading) {
+        return `${uploadSummary.uploading} uploading`;
+      }
+      if (uploadSummary.processing) {
+        return `${uploadSummary.processing} processing`;
+      }
+      return "Upload running";
+    }
+    if (uploadSummary.failed) {
+      return `${uploadSummary.failed} failed`;
+    }
+    if (uploadSummary.success) {
+      return `${uploadSummary.success} complete`;
+    }
+    if (uploadSummary.queued) {
+      return `${uploadSummary.queued} queued`;
+    }
+    return "No uploads";
+  }, [uploadRunning, uploadSummary]);
+
+  function togglePublicDebugPanel() {
+    setPublicDebugPanelVisible((current) => {
+      const nextValue = !current;
+      writePublicDebugPanelVisible(nextValue);
+      return nextValue;
+    });
+  }
+
+  function openUploadDialog() {
+    setUploadDialogOpen(true);
+    setUploadDialogMinimized(false);
+  }
+
+  function minimizeUploadDialog() {
+    setUploadDialogOpen(false);
+    setUploadDialogMinimized(true);
+  }
+
+  function closeUploadDialog() {
+    setUploadDialogOpen(false);
+    setUploadDialogMinimized(uploadRunning);
+  }
 
   function toggle(id: string) {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -204,6 +254,8 @@ export function AdminListPage() {
       setNotice("");
       setError("");
     }
+    setUploadDialogOpen(true);
+    setUploadDialogMinimized(false);
     event.target.value = "";
   }
 
@@ -500,130 +552,183 @@ export function AdminListPage() {
 
   return (
     <main className="admin-shell">
-      <section className="admin-toolbar panel">
-        <div className="toolbar-group">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, text or place" />
-          <select value={geoFilter} onChange={(event) => setGeoFilter(event.target.value as GeoFilter)}>
-            <option value="all">All GPS</option>
-            <option value="missing">Missing GPS</option>
-            <option value="attached">GPS attached</option>
-          </select>
-          <select
-            value={locationLabelFilter}
-            onChange={(event) => setLocationLabelFilter(event.target.value as LocationLabelFilter)}
-          >
-            <option value="all">All place labels</option>
-            <option value="present">With place label</option>
-            <option value="missing">Without place label</option>
-          </select>
-          <select
-            value={visibilityFilter}
-            onChange={(event) => setVisibilityFilter(event.target.value as VisibilityFilter)}
-          >
-            <option value="all">All visibility</option>
-            <option value="visible">Visible only</option>
-            <option value="hidden">Hidden only</option>
-          </select>
-          <select value={deletedFilter} onChange={(event) => setDeletedFilter(event.target.value as DeletedFilter)}>
-            <option value="all">All states</option>
-            <option value="active">Active only</option>
-            <option value="deleted">Deleted only</option>
-          </select>
-          <button onClick={() => void load()}>Search</button>
-        </div>
-        <div className="toolbar-group">
-          <button type="button" onClick={selectAllVisible} disabled={!items.length}>
-            Select all
-          </button>
-          <button type="button" onClick={clearSelection} disabled={!selected.length}>
-            Deselect all
-          </button>
-          <button onClick={() => void doBatch("visible")}>Show</button>
-          <button onClick={() => void doBatch("hidden")}>Hide</button>
-          <button onClick={() => void doBatch("gps")}>Set GPS</button>
-          <button onClick={() => void doBatch("delete")} className="danger">
-            Delete
-          </button>
-          <button onClick={() => void doBatch("restore")}>Restore</button>
-          <button onClick={() => void doBatch("purge")} className="danger">
-            Purge
-          </button>
-          <button type="button" onClick={() => void purgeDeletedPhotos()} className="danger">
-            Empty trash
-          </button>
-        </div>
-      </section>
-
-      <section className="panel upload-panel">
-        <div className="upload-panel-header">
-          <div>
-            <p className="eyebrow">Batch Upload</p>
-            <h2>Import multiple photos</h2>
+      <div className="admin-toolbar-shell">
+        <section className="admin-toolbar panel">
+          <div className="toolbar-group">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, text or place" />
+            <select value={geoFilter} onChange={(event) => setGeoFilter(event.target.value as GeoFilter)}>
+              <option value="all">All GPS</option>
+              <option value="missing">Missing GPS</option>
+              <option value="attached">GPS attached</option>
+            </select>
+            <select
+              value={locationLabelFilter}
+              onChange={(event) => setLocationLabelFilter(event.target.value as LocationLabelFilter)}
+            >
+              <option value="all">All place labels</option>
+              <option value="present">With place label</option>
+              <option value="missing">Without place label</option>
+            </select>
+            <select
+              value={visibilityFilter}
+              onChange={(event) => setVisibilityFilter(event.target.value as VisibilityFilter)}
+            >
+              <option value="all">All visibility</option>
+              <option value="visible">Visible only</option>
+              <option value="hidden">Hidden only</option>
+            </select>
+            <select value={deletedFilter} onChange={(event) => setDeletedFilter(event.target.value as DeletedFilter)}>
+              <option value="all">All states</option>
+              <option value="active">Active only</option>
+              <option value="deleted">Deleted only</option>
+            </select>
+            <button onClick={() => void load()}>Search</button>
           </div>
-          <div className="upload-panel-actions">
-            <label className="file-button">
-              Select photos
-              <input type="file" multiple accept="image/*" onChange={onSelectFiles} disabled={uploadRunning} />
-            </label>
-            <button type="button" onClick={() => void startUploadBatch()} disabled={queuedUploadCount === 0 || uploadRunning}>
-              {uploadRunning ? "Uploading..." : "Start upload"}
+          <div className="toolbar-group">
+            <button type="button" onClick={selectAllVisible} disabled={!items.length}>
+              Select all
+            </button>
+            <button type="button" onClick={clearSelection} disabled={!selected.length}>
+              Deselect all
+            </button>
+            <button type="button" onClick={openUploadDialog}>
+              Upload photos
+            </button>
+            <button onClick={() => void doBatch("visible")}>Show</button>
+            <button onClick={() => void doBatch("hidden")}>Hide</button>
+            <button onClick={() => void doBatch("gps")}>Set GPS</button>
+            <button onClick={() => void doBatch("delete")} className="danger">
+              Delete
+            </button>
+            <button onClick={() => void doBatch("restore")}>Restore</button>
+            <button onClick={() => void doBatch("purge")} className="danger">
+              Purge
+            </button>
+            <button type="button" onClick={() => void purgeDeletedPhotos()} className="danger">
+              Empty trash
             </button>
           </div>
-        </div>
-        <div className="upload-summary">
-          <span>Total {uploadSummary.total}</span>
-          <span>Queued {uploadSummary.queued}</span>
-          <span>Uploading {uploadSummary.uploading}</span>
-          <span>Processing {uploadSummary.processing}</span>
-          <span>Success {uploadSummary.success}</span>
-          <span>Failed {uploadSummary.failed}</span>
-        </div>
-        {uploadJob ? <p className="upload-job-note">Job {uploadJob.id} · {uploadJob.status} · {uploadJob.summaryMessage || "Waiting to start."}</p> : null}
-        {uploadItems.length ? (
-          <div className="upload-list">
-            {uploadItems.map((item) => (
-              <div key={item.localId} className={`upload-row ${item.status}`}>
-                <div className="upload-row-main">
-                  <strong>{item.filename}</strong>
-                  <span>{item.status === "uploading" ? `Uploading ${Math.round(item.progress * 100)}%` : item.status}</span>
-                </div>
-                <div className="upload-row-meta">
-                  {item.error ? <span className="error">{item.error}</span> : null}
-                  {!uploadRunning && item.status === "queued" ? (
-                    <button type="button" className="ghost-button" onClick={() => removeUploadItem(item.localId)}>
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ))}
+          <div className="toolbar-group toolbar-group-settings">
+            <label className="toolbar-toggle">
+              <input type="checkbox" checked={publicDebugPanelVisible} onChange={togglePublicDebugPanel} />
+              <span>Show homepage test window</span>
+            </label>
           </div>
-        ) : (
-          <p className="upload-empty">Select one or more photos to create a batch import job.</p>
-        )}
+        </section>
+
+        {notice ? <p className="notice panel admin-status-banner">{notice}</p> : null}
+        {error ? <p className="error panel admin-status-banner">{error}</p> : null}
+      </div>
+
+      <section className="admin-browser">
+        <section className="cms-grid">
+          {items.map((item) => (
+            <article key={item.id} className={`photo-card panel ${selectedSet.has(item.id) ? "selected" : ""}`}>
+              <div className="photo-select">
+                <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => toggle(item.id)} />
+              </div>
+              <div className="photo-meta">
+                <span className="photo-place">{item.locationLabel || "Place label missing"}</span>
+                <div className="photo-status-row">
+                  <span>{item.hasGeo ? "GPS attached" : "Missing GPS"}</span>
+                  <span>{item.visibilityStatus}</span>
+                </div>
+                <span>{item.deletedAt ? "Deleted" : "Active"}</span>
+              </div>
+              <Link to={`/admin/photos/${item.id}`} className="photo-card-link">
+                <img src={item.thumbnailUrl} alt={item.title} />
+              </Link>
+            </article>
+          ))}
+        </section>
       </section>
 
-      {notice ? <p className="notice panel">{notice}</p> : null}
-      {error ? <p className="error panel">{error}</p> : null}
-      <section className="cms-grid">
-        {items.map((item) => (
-          <article key={item.id} className={`photo-card panel ${selectedSet.has(item.id) ? "selected" : ""}`}>
-            <div className="photo-select">
-              <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => toggle(item.id)} />
+      {uploadDialogOpen ? (
+        <section className="modal-backdrop" onClick={closeUploadDialog}>
+          <div className="modal-panel panel upload-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Batch Upload</p>
+                <h2>Import multiple photos</h2>
+              </div>
+              <div className="upload-modal-header-actions">
+                {hasUploadSession ? (
+                  <button type="button" className="ghost-button" onClick={minimizeUploadDialog}>
+                    Minimize
+                  </button>
+                ) : null}
+                <button type="button" className="ghost-button" onClick={closeUploadDialog}>
+                  Close
+                </button>
+              </div>
             </div>
-            <Link to={`/admin/photos/${item.id}`}>
-              <img src={item.thumbnailUrl} alt={item.title} />
-            </Link>
-            <div className="photo-meta">
-              <strong>{item.title}</strong>
-              <span>{item.locationLabel ? `Place: ${item.locationLabel}` : "Place label missing"}</span>
-              <span>{item.hasGeo ? "GPS attached" : "Missing GPS"}</span>
-              <span>{item.visibilityStatus}</span>
-              <span>{item.deletedAt ? "Deleted" : "Active"}</span>
+            <div className="upload-panel-actions">
+              <label className="file-button">
+                Select photos
+                <input type="file" multiple accept="image/*" onChange={onSelectFiles} disabled={uploadRunning} />
+              </label>
+              <button type="button" onClick={() => void startUploadBatch()} disabled={queuedUploadCount === 0 || uploadRunning}>
+                {uploadRunning ? "Uploading..." : "Start upload"}
+              </button>
             </div>
-          </article>
-        ))}
-      </section>
+            <div className="upload-summary">
+              <span>Total {uploadSummary.total}</span>
+              <span>Queued {uploadSummary.queued}</span>
+              <span>Uploading {uploadSummary.uploading}</span>
+              <span>Processing {uploadSummary.processing}</span>
+              <span>Success {uploadSummary.success}</span>
+              <span>Failed {uploadSummary.failed}</span>
+            </div>
+            {uploadJob ? (
+              <p className="upload-job-note">
+                Job {uploadJob.id} · {uploadJob.status} · {uploadJob.summaryMessage || "Waiting to start."}
+              </p>
+            ) : null}
+            {uploadItems.length ? (
+              <div className="upload-list">
+                {uploadItems.map((item) => (
+                  <div key={item.localId} className={`upload-row ${item.status}`}>
+                    <div className="upload-row-main">
+                      <strong>{item.filename}</strong>
+                      <span>{item.status === "uploading" ? `Uploading ${Math.round(item.progress * 100)}%` : item.status}</span>
+                    </div>
+                    <div className="upload-row-meta">
+                      {item.error ? <span className="error">{item.error}</span> : null}
+                      {!uploadRunning && item.status === "queued" ? (
+                        <button type="button" className="ghost-button" onClick={() => removeUploadItem(item.localId)}>
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="upload-empty">Select one or more photos to create a batch import job.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {showUploadDock ? (
+        <section className="upload-dock panel">
+          <div className="upload-dock-copy">
+            <strong>Batch upload</strong>
+            <span>{uploadDockLabel}</span>
+          </div>
+          <div className="upload-dock-actions">
+            <button type="button" className="ghost-button" onClick={openUploadDialog}>
+              Open
+            </button>
+            {!uploadRunning ? (
+              <button type="button" className="ghost-button" onClick={() => setUploadDialogMinimized(false)}>
+                Hide
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       {gpsDialogOpen ? (
         <section className="modal-backdrop" onClick={closeGpsDialog}>
           <div className="modal-panel panel" onClick={(event) => event.stopPropagation()}>

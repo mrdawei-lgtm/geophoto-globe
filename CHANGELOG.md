@@ -2,6 +2,31 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.10 - 2026-03-26
+
+### Added
+
+- Added `VITE_GA_MEASUREMENT_ID` support so public-page Google Analytics can be enabled from environment configuration
+- Added public analytics tracking for route pageviews, lightbox photo opens, and lightbox `fit` / `fill` toggle events
+- Added an admin toggle for showing or hiding the public homepage debug panel
+
+### Changed
+
+- Changed the public homepage debug panel to stay hidden by default until explicitly enabled from the admin CMS
+- Changed admin photo-list layout so the search and action toolbar stays visible while only the thumbnail region scrolls
+- Changed admin photo cards to use smaller thumbnails, hide filenames, and surface place labels on the first row
+- Changed the admin batch uploader from an inline section into a modal workflow with minimize / reopen support during uploads
+- Changed GPS edits so photo metadata updates no longer attempt to write GPS back into managed image EXIF files
+- Changed purge behavior so deleting photo records no longer requires removing managed image copies
+
+### Fixed
+
+- Fixed legacy absolute storage paths by normalizing managed-asset paths against the current server storage root
+- Fixed public cluster labels so thumbnail-to-cluster transitions no longer flash `undefined` counts
+- Fixed production SPA routing under `Express 5` by replacing the invalid wildcard route registration
+- Fixed production asset resolution so the server now finds the built `dist/index.html` from the correct app root
+- Fixed homepage and admin frontend serving in production after rebuilds by correcting root path handling for static files
+
 ## 0.1.9 - 2026-03-25
 
 ### Added

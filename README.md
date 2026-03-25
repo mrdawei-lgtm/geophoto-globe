@@ -13,8 +13,8 @@ This project focuses on two core problems:
 
 1. 提供一个公开可访问的 3D 地球前台，用户可以按地理位置浏览照片。  
    Provide a public 3D globe experience for browsing photos by location.
-2. 提供一个图片 CMS 后台，管理员可以导入照片、编辑信息、补充 GPS、批量管理显示状态，并把 GPS 写回图片 EXIF。  
-   Provide an admin CMS for importing photos, editing metadata, filling in GPS, managing visibility in batches, and writing GPS back into EXIF.
+2. 提供一个图片 CMS 后台，管理员可以导入照片、编辑信息、补充 GPS、批量管理显示状态，并维护同地点共享简介。  
+   Provide an admin CMS for importing photos, editing metadata, filling in GPS, managing visibility in batches, and maintaining shared intros per location.
 
 核心体验不是普通相册，而是按地点浏览照片库。  
 The core experience is not a conventional album, but a location-driven photo library.
@@ -83,8 +83,8 @@ Implemented or currently in scope:
   Manual GPS editing
 - 根据地址联网搜索经纬度  
   Geocoding by address search
-- 将 GPS 写入图片 EXIF  
-  GPS write-back to image EXIF
+- 后台首页可控制前台测试窗口开关  
+  Toggle the public homepage debug panel from the admin list page
 - 批量删除  
   Batch soft delete
 - 批量恢复  
@@ -156,8 +156,8 @@ Why this stack:
   `sharp` for thumbnails and display images
 - `exifr` 读取 EXIF  
   `exifr` for EXIF parsing
-- `exiftool-vendored` 写回 EXIF  
-  `exiftool-vendored` for EXIF write-back
+- `exiftool-vendored` 读取补充元数据  
+  `exiftool-vendored` for supplemental metadata reads
 
 ### 分层结构 | Backend Structure
 
@@ -198,8 +198,8 @@ Design principles:
 
 - 原图保留不改动  
   Keep original files untouched
-- 系统只修改托管副本  
-  Only modify managed copies
+- 托管副本主要用于导入阶段的统一元数据读取和兼容处理  
+  Managed copies are primarily used for import-time metadata reads and compatibility handling
 - 缩略图和展示图独立生成  
   Generate thumbnails and display images separately
 - 元数据和导入任务统一落到 SQLite  
@@ -304,6 +304,9 @@ Recommended import endpoints:
 当前管理端上传队列固定并发为 `2`。  
 The current admin upload queue runs with fixed concurrency `2`.
 
+当前上传入口是管理端列表页中的弹出窗口，可在上传过程中最小化为右下角悬浮状态条。  
+The current upload entry is a modal in the admin list page and can be minimized into a bottom-right floating status dock while uploads continue.
+
 每个文件拥有独立状态：  
 Each file has an independent lifecycle:
 
@@ -335,8 +338,8 @@ In the photo editor, the admin can:
   Search by address
 - 编辑 `description` 时，同坐标照片会自动同步  
   Editing `description` automatically syncs the same text to photos at the exact same coordinates
-- 保存后更新数据库并写回托管副本 EXIF  
-  Update the database and write GPS back into the managed copy EXIF
+- 保存后更新数据库，并同步同坐标组的共享简介逻辑  
+  Save changes to the database and update shared-intro behavior for the exact coordinate group
 
 ### 批量设置 GPS | Batch GPS Update
 
@@ -604,18 +607,20 @@ The current codebase already delivers a working first version, including:
   Lightbox photo viewing
 - 右上角可折叠信息面板  
   Collapsible top-right info panel
-- 左下角调试指标面板（含 FPS）  
-  Bottom-left debug metrics panel including FPS
+- 左下角调试指标面板（默认隐藏，可在后台开关，含 FPS）  
+  Bottom-left debug metrics panel including FPS, hidden by default and toggleable from the admin CMS
 - 后台 CMS 登录  
   Admin CMS login
 - 批量导入照片  
   Batch photo import
+- 管理端上传弹窗与最小化上传悬浮条  
+  Admin upload modal with a minimizable floating upload dock
 - 单图编辑  
   Single-photo editing
 - 地址搜索坐标  
   Address geocoding
-- EXIF 写回  
-  EXIF GPS write-back
+- 后台列表固定工具栏与独立滚动缩略图区  
+  Sticky admin toolbar with an independently scrolling thumbnail region
 - 批量显示 / 隐藏  
   Batch visibility updates
 - 批量软删除 / 恢复 / 永久清理  
@@ -630,8 +635,8 @@ The current codebase already delivers a working first version, including:
   SQLite metadata storage
 - 轻量级导入任务进度与失败记录  
   Lightweight import job tracking with persisted failures
-- 管理端多文件上传队列  
-  Multi-file upload queue in the admin UI
+- 管理端多文件上传队列与弹窗工作流  
+  Multi-file upload queue with a modal-based admin workflow
 - `repository / service / db` 分层  
   `repository / service / db` layering
 

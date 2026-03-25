@@ -3,6 +3,7 @@ import { trackEvent } from "../analytics";
 import { GlobeScene } from "../components/GlobeScene";
 import { api } from "../lib/api";
 import { useDeviceTier } from "../lib/device";
+import { readPublicDebugPanelVisible } from "../lib/preferences";
 
 type PublicPhoto = {
   id: string;
@@ -72,6 +73,7 @@ export function PublicGlobePage() {
   const [cameraDistance, setCameraDistance] = useState(4.7);
   const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
   const [framesPerSecond, setFramesPerSecond] = useState(0);
+  const [debugPanelVisible, setDebugPanelVisible] = useState(() => readPublicDebugPanelVisible());
   const [imageFillMode, setImageFillMode] = useState(false);
   const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -89,8 +91,17 @@ export function PublicGlobePage() {
     const handleResize = () => {
       setViewport({ width: window.innerWidth, height: window.innerHeight });
     };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "publicDebugPanelVisible") {
+        setDebugPanelVisible(readPublicDebugPanelVisible());
+      }
+    };
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -240,15 +251,17 @@ export function PublicGlobePage() {
           />
         </div>
       </section>
-      <div className="globe-debug-panel" aria-live="polite">
-        <span>FPS {framesPerSecond ? Math.round(framesPerSecond) : "--"}</span>
-        <span>Zoom x{zoomFactor.toFixed(2)}</span>
-        <span>Distance {cameraDistance.toFixed(2)}</span>
-        <span>Earth {earthPixelDiameter.toFixed(0)}px</span>
-        <span>
-          Viewport {viewport.width} x {viewport.height}
-        </span>
-      </div>
+      {debugPanelVisible ? (
+        <div className="globe-debug-panel" aria-live="polite">
+          <span>FPS {framesPerSecond ? Math.round(framesPerSecond) : "--"}</span>
+          <span>Zoom x{zoomFactor.toFixed(2)}</span>
+          <span>Distance {cameraDistance.toFixed(2)}</span>
+          <span>Earth {earthPixelDiameter.toFixed(0)}px</span>
+          <span>
+            Viewport {viewport.width} x {viewport.height}
+          </span>
+        </div>
+      ) : null}
       {selected && currentPhoto ? (
         <div className="lightbox" onClick={closeLightbox}>
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>

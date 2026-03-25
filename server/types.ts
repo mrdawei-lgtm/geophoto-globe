@@ -16,6 +16,7 @@ export type PhotoRecord = {
   thumbnailUrl: string;
   displayImageUrl: string;
   title: string;
+  narrativePrompt: string;
   description: string;
   descriptionSource: DescriptionSource;
   capturedAt: string | null;

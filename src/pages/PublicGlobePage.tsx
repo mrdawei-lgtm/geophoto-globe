@@ -60,7 +60,10 @@ function buildLightboxImageStyle(imageFillMode: boolean, fillScrollAxis: "x" | "
 export function PublicGlobePage() {
   const tier = useDeviceTier();
   const [mode, setMode] = useState<"cluster" | "items">("cluster");
-  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  const [items, setItems] = useState<{ mode: "cluster" | "items"; values: Array<Record<string, unknown>> }>({
+    mode: "cluster",
+    values: []
+  });
   const [selected, setSelected] = useState<PublicPhotoGroup | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [error, setError] = useState("");
@@ -90,11 +93,28 @@ export function PublicGlobePage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     api
       .publicPhotos(mode, tier)
-      .then((data) => setItems(data.items))
-      .catch((err: Error) => setError(err.message));
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        setItems({ mode, values: data.items });
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [mode, tier]);
+
+  const visibleItems = items.mode === mode ? items.values : [];
 
   useEffect(() => {
     setImageFillMode(false);
@@ -179,7 +199,7 @@ export function PublicGlobePage() {
           <GlobeScene
             tier={tier}
             mode={mode}
-            items={items as never[]}
+            items={visibleItems as never[]}
             focus={null}
             motionEnabled={!selected}
             onModeChange={setMode}

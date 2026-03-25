@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import type { ReactElement } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { trackPageView } from "./analytics";
 import { AdminListPage } from "./pages/AdminListPage";
 import { AdminLoginPage } from "./pages/AdminLoginPage";
 import { AdminPhotoPage } from "./pages/AdminPhotoPage";
@@ -18,6 +20,12 @@ function AdminGuard({ children }: { children: ReactElement }) {
 }
 
 export default function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    trackPageView(`${location.pathname}${location.search}${location.hash}`);
+  }, [location.hash, location.pathname, location.search]);
+
   return (
     <div className="shell">
       <header className="topbar">

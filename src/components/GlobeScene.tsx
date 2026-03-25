@@ -645,10 +645,12 @@ function PeripheralClusterMarkers({
 }
 
 function ClusterCount({ count, position }: { count: number; position: [number, number, number] }) {
+  const safeCount = Number.isFinite(count) ? count : 0;
+
   return (
     <Billboard follow position={position}>
       <Text color="white" fontSize={0.0275} anchorX="center" anchorY="middle">
-        {String(count)}
+        {String(safeCount)}
       </Text>
     </Billboard>
   );

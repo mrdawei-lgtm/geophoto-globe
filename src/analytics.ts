@@ -28,8 +28,8 @@ function loadAnalytics() {
 
   analyticsLoaded = true;
   window.dataLayer = window.dataLayer || [];
-  window.gtag = window.gtag || function gtag(...args: unknown[]) {
-    window.dataLayer.push(args);
+  window.gtag = window.gtag || function gtag() {
+    window.dataLayer.push(arguments);
   };
 
   window.gtag("js", new Date());
@@ -50,6 +50,7 @@ export function trackPageView(path: string) {
 
   loadAnalytics();
   window.gtag?.("event", "page_view", {
+    send_to: measurementId,
     page_location: window.location.href,
     page_path: path,
     page_title: document.title
@@ -64,5 +65,8 @@ export function trackEvent(eventName: string, params: Record<string, string | nu
   }
 
   loadAnalytics();
-  window.gtag?.("event", eventName, params);
+  window.gtag?.("event", eventName, {
+    send_to: measurementId,
+    ...params
+  });
 }

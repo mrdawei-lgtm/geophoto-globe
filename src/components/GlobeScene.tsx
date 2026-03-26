@@ -866,6 +866,7 @@ export function GlobeScene({
         onFramesPerSecondChange={onFramesPerSecondChange}
       />
       <OrbitControls
+        key={`orbit-controls-${mode}`}
         enablePan={false}
         enableDamping
         dampingFactor={0.14}

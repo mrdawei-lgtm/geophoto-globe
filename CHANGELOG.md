@@ -9,6 +9,8 @@ All notable changes to `GeoPhoto Globe` are recorded here.
 - Added `VITE_GA_MEASUREMENT_ID` support so public-page Google Analytics can be enabled from environment configuration
 - Added public analytics tracking for route pageviews, lightbox photo opens, and lightbox `fit` / `fill` toggle events
 - Added an admin toggle for showing or hiding the public homepage debug panel
+- Added a public theme system with `Default`, `Dark`, and `Bright` presets plus a top-right theme switcher
+- Added dedicated public-theme background assets under `src/assets/themes/`
 
 ### Changed
 
@@ -18,6 +20,9 @@ All notable changes to `GeoPhoto Globe` are recorded here.
 - Changed the admin batch uploader from an inline section into a modal workflow with minimize / reopen support during uploads
 - Changed GPS edits so photo metadata updates no longer attempt to write GPS back into managed image EXIF files
 - Changed purge behavior so deleting photo records no longer requires removing managed image copies
+- Changed the public lightbox and thumbnail styling so each public theme can control its own frame shape, border treatment, and control styling
+- Changed the bright public theme toward a white/gray editorial look with a white ocean, blue cluster accents, and a projected globe outline
+- Changed the dark public theme toward a square-cornered blue-black look with a dark globe, fine blue borders, and an Unsplash photo background
 
 ### Fixed
 
@@ -26,6 +31,7 @@ All notable changes to `GeoPhoto Globe` are recorded here.
 - Fixed production SPA routing under `Express 5` by replacing the invalid wildcard route registration
 - Fixed production asset resolution so the server now finds the built `dist/index.html` from the correct app root
 - Fixed homepage and admin frontend serving in production after rebuilds by correcting root path handling for static files
+- Fixed the bright-theme projected globe outline so it now scales with the globe instead of drifting during zoom changes
 
 ## 0.1.9 - 2026-03-25
 

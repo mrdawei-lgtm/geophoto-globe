@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trackEvent } from "../analytics";
 import { GlobeScene } from "../components/GlobeScene";
 import { api } from "../lib/api";
 import { useDeviceTier } from "../lib/device";
 import { readPublicDebugPanelVisible } from "../lib/preferences";
+import { getPublicTheme, publicThemes, readPublicThemeId, writePublicThemeId } from "../lib/publicTheme";
 
 type PublicPhoto = {
   id: string;
@@ -74,6 +76,7 @@ export function PublicGlobePage() {
   const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
   const [framesPerSecond, setFramesPerSecond] = useState(0);
   const [debugPanelVisible, setDebugPanelVisible] = useState(() => readPublicDebugPanelVisible());
+  const [themeId, setThemeId] = useState(() => readPublicThemeId());
   const [imageFillMode, setImageFillMode] = useState(false);
   const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -82,6 +85,11 @@ export function PublicGlobePage() {
 
   const baseDistance = 4.7;
   const zoomFactor = baseDistance / cameraDistance;
+  const theme = getPublicTheme(themeId);
+  const themeStyle = useMemo(
+    () => theme.cssVariables as CSSProperties,
+    [theme]
+  );
 
   useEffect(() => {
     setCameraDistance(baseDistance);
@@ -94,6 +102,9 @@ export function PublicGlobePage() {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "publicDebugPanelVisible") {
         setDebugPanelVisible(readPublicDebugPanelVisible());
+      }
+      if (event.key === "publicThemeId") {
+        setThemeId(readPublicThemeId());
       }
     };
     window.addEventListener("resize", handleResize);
@@ -217,10 +228,26 @@ export function PublicGlobePage() {
     });
   }
 
+  function handleThemeChange(nextThemeId: string) {
+    const nextTheme = getPublicTheme(nextThemeId);
+    setThemeId(nextTheme.id);
+    writePublicThemeId(nextTheme.id);
+  }
+
   return (
-    <main className="page public-page">
+    <main className="page public-page" data-theme={theme.id} style={themeStyle}>
       <div className={`topbar-panel floating-panel ${panelOpen ? "open" : "collapsed"}`}>
-        <div className="floating-panel-header">
+        <div className="floating-panel-header floating-panel-controls">
+          <label className="theme-switch">
+            <span>Theme</span>
+            <select value={theme.id} onChange={(event) => handleThemeChange(event.target.value)} aria-label="Select visual theme">
+              {publicThemes.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button type="button" className="panel-toggle" onClick={() => setPanelOpen((value) => !value)}>
             {panelOpen ? "Hide" : "Info"}
           </button>
@@ -239,6 +266,7 @@ export function PublicGlobePage() {
         <div className="hero-scene">
           <GlobeScene
             tier={tier}
+            theme={theme}
             mode={mode}
             items={visibleItems as never[]}
             focus={null}

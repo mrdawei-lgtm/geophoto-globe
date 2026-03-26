@@ -38,6 +38,8 @@ The public homepage is an interactive 3D globe.
   Shows cluster markers at distant zoom levels
 - 近景下按屏幕中心区域展开为单张照片缩略图，外围继续显示聚合点  
   Expands into individual photo thumbnails near the center of the screen while keeping peripheral markers clustered
+- 右上角支持切换 `Default`、`Dark`、`Bright` 三套公开页主题  
+  Supports `Default`, `Dark`, and `Bright` public themes from the top-right selector
 - 桌面端支持 hover 放大缩略图  
   Supports hover enlargement for thumbnails on desktop
 - 点击照片后全屏显示大图和文字介绍，支持右上角关闭与图片填充切换  
@@ -123,6 +125,19 @@ Admin workflow:
    Search for coordinates by address and save them
 8. 进行批量显示 / 隐藏、删除 / 恢复、GPS 设置  
    Perform batch visibility, delete / restore, and GPS actions
+
+## 视觉资源说明 | Visual Asset Credits
+
+公开页主题背景图位于 `src/assets/themes/`。  
+Public-theme background images live in `src/assets/themes/`.
+
+- `dark-background.jpg` 来自 [Unsplash](https://unsplash.com/photos/KvgB81s4dF0)  
+  `dark-background.jpg` is sourced from [Unsplash](https://unsplash.com/photos/KvgB81s4dF0)
+- `bright-background.jpg` 来自 [Unsplash](https://unsplash.com/photos/lNoAcnHIRo0)  
+  `bright-background.jpg` is sourced from [Unsplash](https://unsplash.com/photos/lNoAcnHIRo0)
+
+如果后续替换这些背景图，请在更新资源的同时同步修改这里的来源说明。  
+If these backgrounds are replaced later, update this attribution section at the same time.
 
 ## 技术栈 | Tech Stack
 

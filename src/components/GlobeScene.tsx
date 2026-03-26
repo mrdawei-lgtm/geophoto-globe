@@ -8,7 +8,8 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import type { DeviceTier } from "../lib/device";
-import earthMapUrl from "../assets/globe/earth-map.svg?url";
+import type { PublicTheme } from "../lib/publicTheme";
+import earthMapSvg from "../assets/globe/earth-map.svg?raw";
 import countriesData from "world-atlas/countries-50m.json";
 import landData from "world-atlas/land-50m.json";
 
@@ -114,6 +115,15 @@ const ITEM_MODE_DISTANCE = 3.5;
 const INITIAL_CAMERA_DISTANCE = 4.7;
 const CENTRAL_THUMBNAIL_RADIUS_RATIO = 0.8;
 const FULL_THUMBNAIL_DISTANCE = 1.7;
+
+function buildEarthTextureUrl(theme: PublicTheme["globe"]) {
+  const svg = earthMapSvg
+    .replace('fill="#93a7af"', `fill="${theme.oceanColor}"`)
+    .replace(/stroke="rgba\(255,255,255,0\.08\)"/g, `stroke="${theme.gridLineColor}"`)
+    .replace('fill="#e1e8eb"', `fill="${theme.landColor}"`);
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 function latLngToVector3(latitude: number, longitude: number, radius = 1.03) {
   const phi = (90 - latitude) * (Math.PI / 180);
@@ -261,6 +271,49 @@ function projectEarthScreenCircle(camera: THREE.Camera, width: number, height: n
     centerY: center.y,
     radius: Math.abs(edge.x - center.x)
   };
+}
+
+function projectionRingScaleForCamera(camera: THREE.Camera) {
+  if (camera instanceof THREE.PerspectiveCamera) {
+    const distance = camera.position.length();
+    return distance / Math.sqrt(Math.max(distance * distance - 1, 0.0001));
+  }
+
+  return 1;
+}
+
+function ProjectionRing({ theme, tier }: { theme: PublicTheme; tier: DeviceTier }) {
+  const { camera } = useThree();
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  useFrame(() => {
+    const ring = ringRef.current;
+    if (!ring) {
+      return;
+    }
+
+    const scale = projectionRingScaleForCamera(camera);
+    ring.scale.setScalar(scale);
+  });
+
+  if (theme.globe.projectionRingOpacity <= 0) {
+    return null;
+  }
+
+  return (
+    <Billboard follow>
+      <mesh ref={ringRef} renderOrder={2}>
+        <ringGeometry args={[0.996, tier === "mobile" ? 1.03 : 1.026, tier === "mobile" ? 96 : 144]} />
+        <meshBasicMaterial
+          color={theme.globe.projectionRingColor}
+          transparent
+          opacity={theme.globe.projectionRingOpacity}
+          depthWrite={false}
+          depthTest
+        />
+      </mesh>
+    </Billboard>
+  );
 }
 
 function isInsideCentralThumbnailArea(
@@ -469,6 +522,7 @@ function GlobeMetricsReporter({
 
 function GlobeShell({
   tier,
+  theme,
   cameraDistance,
   rotationRef,
   focus,
@@ -476,6 +530,7 @@ function GlobeShell({
   children
 }: {
   tier: DeviceTier;
+  theme: PublicTheme;
   cameraDistance: number;
   rotationRef: React.MutableRefObject<number>;
   focus?: { latitude: number | null; longitude: number | null } | null;
@@ -483,7 +538,8 @@ function GlobeShell({
   children?: ReactNode;
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const texture = useLoader(THREE.TextureLoader, earthMapUrl);
+  const textureUrl = useMemo(() => buildEarthTextureUrl(theme.globe), [theme.globe]);
+  const texture = useLoader(THREE.TextureLoader, textureUrl);
   const { gl } = useThree();
   const focusRotationRef = useRef<number | null>(null);
   const { coastlinePositions, borderPositions } = useEarthLineGeometries();
@@ -531,36 +587,56 @@ function GlobeShell({
     <group ref={groupRef}>
       <mesh>
         <sphereGeometry args={[1, tier === "mobile" ? 48 : 80, tier === "mobile" ? 48 : 80]} />
-        <meshStandardMaterial
-          map={texture}
-          roughness={0.98}
-          metalness={0.02}
-          polygonOffset
-          polygonOffsetFactor={1}
-          polygonOffsetUnits={1}
-        />
+        {theme.globe.useUnlitMaterial ? (
+          <meshBasicMaterial
+            map={texture}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+          />
+        ) : (
+          <meshStandardMaterial
+            map={texture}
+            roughness={0.98}
+            metalness={0.02}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+          />
+        )}
       </mesh>
       <EarthLineOverlay
         positions={coastlinePositions}
-        color="#d7e1e6"
+        color={theme.globe.coastlineColor}
         opacity={0.72}
         lineWidth={isMobile ? 1.3 : 1.65}
         renderOrder={10}
       />
       <EarthLineOverlay
         positions={borderPositions}
-        color="#b8c5cc"
+        color={theme.globe.borderColor}
         opacity={0.42}
         lineWidth={isMobile ? 0.95 : 1.15}
         renderOrder={11}
       />
       <mesh>
         <sphereGeometry args={[1.01, 64, 64]} />
-        <meshBasicMaterial color="#1f2d35" side={THREE.BackSide} transparent opacity={0.18} depthWrite={false} />
+        <meshBasicMaterial
+          color={theme.globe.innerShellColor}
+          side={THREE.BackSide}
+          transparent
+          opacity={theme.globe.innerShellOpacity}
+          depthWrite={false}
+        />
       </mesh>
       <mesh>
         <sphereGeometry args={[1.018, 40, 40]} />
-        <meshBasicMaterial color="#dbe6eb" transparent opacity={0.055} depthWrite={false} />
+        <meshBasicMaterial
+          color={theme.globe.outerShellColor}
+          transparent
+          opacity={theme.globe.outerShellOpacity}
+          depthWrite={false}
+        />
       </mesh>
       {children}
     </group>
@@ -638,7 +714,7 @@ function ThumbnailOverlayLayer({
               y1={item.anchorY}
               x2={item.thumbX}
               y2={item.thumbY}
-              stroke="rgba(220, 236, 245, 0.68)"
+              stroke="var(--theme-thumbnail-line)"
               strokeWidth="1"
             />
           ))}
@@ -695,11 +771,13 @@ function PeripheralClusterMarkers({
   items,
   cameraDistance,
   tier,
+  theme,
   rotationRef
 }: {
   items: PhotoItem[];
   cameraDistance: number;
   tier: DeviceTier;
+  theme: PublicTheme;
   rotationRef: React.MutableRefObject<number>;
 }) {
   const { camera, size } = useThree();
@@ -737,18 +815,26 @@ function PeripheralClusterMarkers({
   return (
     <>
       {clusters.map((item) => (
-        <ClusterMarker key={item.id} item={item} />
+        <ClusterMarker key={item.id} item={item} theme={theme} />
       ))}
     </>
   );
 }
 
-function ClusterCount({ count, position }: { count: number; position: [number, number, number] }) {
+function ClusterCount({
+  count,
+  color,
+  position
+}: {
+  count: number;
+  color: string;
+  position: [number, number, number];
+}) {
   const safeCount = Number.isFinite(count) ? count : 0;
 
   return (
     <Billboard follow position={position}>
-      <Text color="white" fontSize={0.0275} anchorX="center" anchorY="middle">
+      <Text color={color} fontSize={0.0275} anchorX="center" anchorY="middle">
         {String(safeCount)}
       </Text>
     </Billboard>
@@ -759,7 +845,7 @@ function lineGeometry(points: THREE.Vector3[]) {
   return new Float32Array(points.flatMap((point) => point.toArray()));
 }
 
-function ClusterMarker({ item }: { item: ClusterItem }) {
+function ClusterMarker({ item, theme }: { item: ClusterItem; theme: PublicTheme }) {
   const anchor = useMemo(() => latLngToVector3(item.latitude, item.longitude, 1.01), [item.latitude, item.longitude]);
   const position = useMemo(() => latLngToVector3(item.latitude, item.longitude, 1.06), [item.latitude, item.longitude]);
   const countPosition = useMemo<[number, number, number]>(() => {
@@ -773,20 +859,24 @@ function ClusterMarker({ item }: { item: ClusterItem }) {
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[linePositions, 3]} count={2} />
         </bufferGeometry>
-        <lineBasicMaterial color="#ffd8c8" transparent opacity={0.75} />
+        <lineBasicMaterial color={theme.globe.borderColor} transparent opacity={0.75} />
       </line>
       <group position={position}>
         <mesh>
           <sphereGeometry args={[0.024, 12, 12]} />
-          <meshStandardMaterial color="#ff9360" emissive="#ff5f2e" emissiveIntensity={0.35} />
+          <meshStandardMaterial
+            color={theme.globe.clusterColor}
+            emissive={theme.globe.clusterEmissive}
+            emissiveIntensity={0.35}
+          />
         </mesh>
-        <ClusterCount count={item.count} position={countPosition} />
+        <ClusterCount count={item.count} color={theme.globe.clusterTextColor} position={countPosition} />
       </group>
     </>
   );
 }
 
-function CityLabels({ cameraDistance }: { cameraDistance: number }) {
+function CityLabels({ cameraDistance, theme }: { cameraDistance: number; theme: PublicTheme }) {
   return (
     <>
       {CITY_LABELS.filter((city) => cameraDistance <= city.minDistance).map((city) => {
@@ -795,8 +885,8 @@ function CityLabels({ cameraDistance }: { cameraDistance: number }) {
         return (
           <group key={city.name} position={position} quaternion={quaternion}>
             <Text
-              color="#f4f8fb"
-              outlineColor="rgba(82,92,100,0.52)"
+              color={theme.globe.cityLabelColor}
+              outlineColor={theme.globe.cityLabelOutline}
               outlineWidth={0.0007}
               fontSize={0.012}
               anchorX="center"
@@ -814,6 +904,7 @@ function CityLabels({ cameraDistance }: { cameraDistance: number }) {
 
 export function GlobeScene({
   tier,
+  theme,
   mode,
   items,
   focus,
@@ -825,6 +916,7 @@ export function GlobeScene({
   onSelect
 }: {
   tier: DeviceTier;
+  theme: PublicTheme;
   mode: "cluster" | "items";
   items: ClusterItem[] | PhotoItem[];
   focus?: { latitude: number | null; longitude: number | null } | null;
@@ -884,23 +976,26 @@ export function GlobeScene({
           syncDistance(event.target.object.position.length());
         }}
       />
-      <fog attach="fog" args={["#8f9398", 6.5, 11]} />
+      {theme.globe.fogEnabled ? <fog attach="fog" args={[theme.globe.fogColor, 6.5, 11]} /> : null}
+      <ProjectionRing theme={theme} tier={tier} />
       <GlobeShell
         tier={tier}
+        theme={theme}
         cameraDistance={cameraDistance}
         rotationRef={globeRotationRef}
         focus={focus}
         motionEnabled={motionEnabled}
       >
-        <CityLabels cameraDistance={cameraDistance} />
+        <CityLabels cameraDistance={cameraDistance} theme={theme} />
         {mode === "cluster"
-          ? (items as ClusterItem[]).map((item) => <ClusterMarker key={item.id} item={item} />)
+          ? (items as ClusterItem[]).map((item) => <ClusterMarker key={item.id} item={item} theme={theme} />)
           : null}
         {mode === "items" ? (
           <PeripheralClusterMarkers
             items={items as PhotoItem[]}
             cameraDistance={cameraDistance}
             tier={tier}
+            theme={theme}
             rotationRef={globeRotationRef}
           />
         ) : null}

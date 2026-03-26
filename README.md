@@ -519,7 +519,11 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 PORT=8787
 DATABASE_PATH=/opt/geophoto-globe/data/geophoto-globe.sqlite
 NODE_ENV=production
+VITE_GA_MEASUREMENT_ID=G-XXXXXXXXXX
 ```
+
+`VITE_GA_MEASUREMENT_ID` 由 Vite 在前端构建时读取，因此必须在 `npm run build` 之前设置；后续如果修改该值，需要重新构建并重新部署。  
+`VITE_GA_MEASUREMENT_ID` is read by Vite at frontend build time, so it must be set before `npm run build`; if it changes later, rebuild and redeploy.
 
 5. 初始化数据库并构建：  
    Bootstrap the database and build:

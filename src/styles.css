@@ -647,46 +647,54 @@ button.danger {
   background: rgba(2, 10, 16, 0.86);
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 0.55rem;
   z-index: 50;
 }
 
 .lightbox-panel {
   width: min(1280px, 100%);
-  height: min(92vh, calc(100vh - 2rem));
-  max-height: min(92vh, calc(100vh - 2rem));
+  height: min(95vh, calc(100vh - 1.1rem));
+  max-height: min(95vh, calc(100vh - 1.1rem));
   overflow: hidden;
   display: grid;
   grid-template-columns: 1fr;
   grid-template-rows: minmax(0, 1fr) auto;
-  gap: 0.9rem;
+  gap: 0.55rem;
   background: #06111a;
-  padding: 1rem;
+  padding: 0.65rem;
   border: 1px solid rgba(164, 201, 230, 0.12);
-  border-radius: 28px;
+  border-radius: 22px;
 }
 
 .lightbox-media {
-  position: relative;
   min-height: 0;
-  height: auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.45rem;
   background: linear-gradient(180deg, rgba(9, 24, 35, 0.96), rgba(4, 11, 18, 0.96));
   border: 1px solid rgba(164, 201, 230, 0.1);
-  border-radius: 22px;
+  border-radius: 18px;
+  padding: 0.55rem;
+}
+
+.lightbox-media-viewport {
+  min-height: 0;
+  border-radius: 14px;
   overflow: hidden;
+  background: rgba(3, 10, 15, 0.78);
 }
 
 .lightbox-media-frame {
-  position: absolute;
-  inset: 1rem 4.8rem 1rem;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
-  border-radius: 16px;
+  border-radius: 14px;
 }
 
 .lightbox-media-frame img {
   display: block;
-  border-radius: 18px;
+  border-radius: 14px;
 }
 
 .lightbox-media-frame.fit-mode {
@@ -735,38 +743,38 @@ button.danger {
   height: auto;
 }
 
+.lightbox-media-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2.3rem;
+}
+
+.lightbox-media-nav,
+.lightbox-media-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .lightbox-nav-button {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3rem;
-  height: 3rem;
+  width: 2.3rem;
+  height: 2.3rem;
+  padding: 0;
   display: grid;
   place-items: center;
   border-radius: 999px;
   border: 1px solid rgba(164, 201, 230, 0.22);
   background: rgba(6, 17, 26, 0.74);
   color: #dcecf5;
-  font-size: 1rem;
+  font-size: 0.8rem;
   line-height: 1;
-  z-index: 1;
-}
-
-.lightbox-nav-prev {
-  left: 1rem;
-}
-
-.lightbox-nav-next {
-  right: 1rem;
 }
 
 .lightbox-zoom-button {
-  position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 1;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 2.3rem;
+  height: 2.3rem;
   padding: 0;
   display: grid;
   place-items: center;
@@ -777,12 +785,8 @@ button.danger {
 }
 
 .lightbox-close-button {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 1;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 2.3rem;
+  height: 2.3rem;
   padding: 0;
   display: grid;
   place-items: center;
@@ -794,8 +798,8 @@ button.danger {
 
 .lightbox-close-button svg,
 .lightbox-zoom-button svg {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 0.9rem;
+  height: 0.9rem;
   display: block;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -807,25 +811,21 @@ button.danger {
 .lightbox-copy {
   display: grid;
   align-content: start;
-  gap: 0.5rem;
-  padding: 0.15rem 0.2rem 0.3rem;
+  gap: 0.32rem;
+  padding: 0 0.15rem 0.1rem;
   overflow: auto;
   justify-items: center;
   text-align: center;
 }
 
 .lightbox-position {
-  position: absolute;
-  left: 1rem;
-  bottom: 1rem;
-  transform: none;
   margin: 0;
-  padding: 0.36rem 0.75rem;
+  padding: 0.24rem 0.58rem;
   border-radius: 999px;
   background: rgba(6, 17, 26, 0.76);
   border: 1px solid rgba(164, 201, 230, 0.16);
   color: #8fcbff;
-  font-size: 0.84rem;
+  font-size: 0.72rem;
   letter-spacing: 0.08em;
 }
 
@@ -842,9 +842,9 @@ button.danger {
 
 .lightbox-place-name {
   font-family: var(--font-title);
-  font-size: 1.4rem;
+  font-size: 1.16rem;
   font-weight: 700;
-  line-height: 1.16;
+  line-height: 1.12;
   letter-spacing: 0.01em;
   color: #eef7fc;
 }
@@ -857,16 +857,16 @@ button.danger {
 
 .lightbox-description {
   font-family: var(--font-ui);
-  font-size: 1.08rem;
-  line-height: 1.72;
+  font-size: 0.96rem;
+  line-height: 1.52;
   letter-spacing: 0.01em;
   color: #edf3f7;
-  max-width: 42rem;
+  max-width: 58rem;
 }
 
 .lightbox-captured-at {
   font-family: var(--font-meta);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1069,44 +1069,27 @@ button.danger {
 
   .lightbox-media {
     min-height: 0;
-    height: auto;
+    padding: 0.45rem;
   }
 
-  .lightbox-media-frame {
-    inset: 0.85rem 3.35rem 1rem;
+  .lightbox-media-controls {
+    min-height: 2.1rem;
   }
 
-  .lightbox-nav-button {
-    width: 2.5rem;
-    height: 2.5rem;
-    font-size: 0.82rem;
+  .lightbox-media-nav,
+  .lightbox-media-actions {
+    gap: 0.28rem;
   }
 
-  .lightbox-nav-prev {
-    left: 0.7rem;
-  }
-
-  .lightbox-nav-next {
-    right: 0.7rem;
+  .lightbox-nav-button,
+  .lightbox-zoom-button,
+  .lightbox-close-button {
+    width: 2.1rem;
+    height: 2.1rem;
   }
 
   .lightbox-position {
-    bottom: 0.75rem;
-    font-size: 0.76rem;
-  }
-
-  .lightbox-zoom-button {
-    right: 0.75rem;
-    bottom: 0.75rem;
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  .lightbox-close-button {
-    top: 0.75rem;
-    right: 0.75rem;
-    width: 2.5rem;
-    height: 2.5rem;
+    font-size: 0.68rem;
   }
 
   .modal-header,
@@ -1141,5 +1124,23 @@ button.danger {
 
   .upload-dock-actions button {
     flex: 1;
+  }
+}
+
+@media (orientation: portrait) {
+  .lightbox {
+    padding: 0;
+  }
+
+  .lightbox-panel {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    padding: 0.45rem;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    border-bottom: 0;
   }
 }

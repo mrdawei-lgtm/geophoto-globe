@@ -8,6 +8,18 @@ declare global {
 }
 
 let analyticsLoaded = false;
+let missingMeasurementIdWarned = false;
+
+function warnMissingMeasurementId() {
+  if (measurementId || missingMeasurementIdWarned || typeof console === "undefined") {
+    return;
+  }
+
+  missingMeasurementIdWarned = true;
+  console.warn(
+    "Google Analytics is disabled because VITE_GA_MEASUREMENT_ID is not set. Set it before building the frontend."
+  );
+}
 
 function loadAnalytics() {
   if (!measurementId || analyticsLoaded || typeof document === "undefined") {
@@ -30,6 +42,8 @@ function loadAnalytics() {
 }
 
 export function trackPageView(path: string) {
+  warnMissingMeasurementId();
+
   if (!measurementId || typeof window === "undefined" || path.startsWith("/admin")) {
     return;
   }
@@ -43,6 +57,8 @@ export function trackPageView(path: string) {
 }
 
 export function trackEvent(eventName: string, params: Record<string, string | number | boolean>) {
+  warnMissingMeasurementId();
+
   if (!measurementId || typeof window === "undefined" || window.location.pathname.startsWith("/admin")) {
     return;
   }

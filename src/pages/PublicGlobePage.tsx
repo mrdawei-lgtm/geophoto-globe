@@ -266,70 +266,78 @@ export function PublicGlobePage() {
         <div className="lightbox" onClick={closeLightbox}>
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
             <div className="lightbox-media">
-              <div
-                ref={lightboxMediaRef}
-                className={`lightbox-media-frame ${imageFillMode ? `fill-mode scroll-${fillScrollAxis}` : "fit-mode"}`}
-              >
-                <img
-                  ref={lightboxImageRef}
-                  src={currentPhoto.imageUrl}
-                  alt={currentPhoto.title}
-                  onLoad={handleLightboxImageLoad}
-                  style={buildLightboxImageStyle(imageFillMode, fillScrollAxis)}
-                />
+              <div className="lightbox-media-viewport">
+                <div
+                  ref={lightboxMediaRef}
+                  className={`lightbox-media-frame ${imageFillMode ? `fill-mode scroll-${fillScrollAxis}` : "fit-mode"}`}
+                >
+                  <img
+                    ref={lightboxImageRef}
+                    src={currentPhoto.imageUrl}
+                    alt={currentPhoto.title}
+                    onLoad={handleLightboxImageLoad}
+                    style={buildLightboxImageStyle(imageFillMode, fillScrollAxis)}
+                  />
+                </div>
               </div>
-              {selected.groupCount > 1 ? (
-                <>
-                  <button
-                    type="button"
-                    className="lightbox-nav-button lightbox-nav-prev"
-                    onClick={() => goToPhoto(activeIndex - 1)}
-                    aria-label="Previous photo"
-                  >
-                    &#9664;
-                  </button>
-                  <p className="lightbox-position">
-                    {activeIndex + 1} / {selected.groupCount}
-                  </p>
-                  <button
-                    type="button"
-                    className="lightbox-nav-button lightbox-nav-next"
-                    onClick={() => goToPhoto(activeIndex + 1)}
-                    aria-label="Next photo"
-                  >
-                    &#9654;
-                  </button>
-                </>
-              ) : null}
-              <button
-                type="button"
-                className="lightbox-close-button"
-                onClick={closeLightbox}
-                aria-label="Close preview"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="lightbox-zoom-button"
-                onClick={toggleImageFillMode}
-                aria-pressed={imageFillMode}
-                aria-label={imageFillMode ? "Fit image to frame" : "Fill image frame"}
-              >
-                {imageFillMode ? (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" />
-                    <path d="M9 9h6v6H9z" />
-                  </svg>
+              <div className="lightbox-media-controls">
+                {selected.groupCount > 1 ? (
+                  <div className="lightbox-media-nav">
+                    <button
+                      type="button"
+                      className="lightbox-nav-button lightbox-nav-prev"
+                      onClick={() => goToPhoto(activeIndex - 1)}
+                      aria-label="Previous photo"
+                    >
+                      &#9664;
+                    </button>
+                    <p className="lightbox-position">
+                      {activeIndex + 1} / {selected.groupCount}
+                    </p>
+                    <button
+                      type="button"
+                      className="lightbox-nav-button lightbox-nav-next"
+                      onClick={() => goToPhoto(activeIndex + 1)}
+                      aria-label="Next photo"
+                    >
+                      &#9654;
+                    </button>
+                  </div>
                 ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5" />
-                    <path d="M6 12h12M12 6v12" />
-                  </svg>
+                  <div />
                 )}
-              </button>
+                <div className="lightbox-media-actions">
+                  <button
+                    type="button"
+                    className="lightbox-zoom-button"
+                    onClick={toggleImageFillMode}
+                    aria-pressed={imageFillMode}
+                    aria-label={imageFillMode ? "Fit image to frame" : "Fill image frame"}
+                  >
+                    {imageFillMode ? (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" />
+                        <path d="M9 9h6v6H9z" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5" />
+                        <path d="M6 12h12M12 6v12" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="lightbox-close-button"
+                    onClick={closeLightbox}
+                    aria-label="Close preview"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="lightbox-copy">
               <p className="lightbox-place-name">{currentPhoto.locationLabel || "Location label not set."}</p>

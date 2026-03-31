@@ -2,6 +2,10 @@ export type PhotoListItem = {
   id: string;
   thumbnailUrl: string;
   title: string;
+  photoGroupId: string | null;
+  groupPhotoCount: number;
+  photoGroupCoverThumbnailUrl: string | null;
+  isGroupCover: boolean;
   narrativePrompt: string;
   description: string;
   descriptionSource: "none" | "auto" | "manual";
@@ -16,6 +20,44 @@ export type PhotoListItem = {
   geoSummaryEn: string;
   visibilityStatus: "visible" | "hidden";
   deletedAt: string | null;
+};
+
+export type PhotoGroupItem = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  locationLabel: string;
+  narrativePrompt: string;
+  description: string;
+  descriptionSource: "none" | "auto" | "manual";
+  geoCountryEn: string;
+  geoRegionEn: string;
+  geoLocalityEn: string;
+  geoSummaryEn: string;
+  geoResolvedAt: string | null;
+  coverPhotoId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  photoCount: number;
+  visibleCount: number;
+  hiddenCount: number;
+  deletedCount: number;
+  issues: string[];
+  coverThumbnailUrl: string | null;
+};
+
+export type PhotoGroupMember = {
+  id: string;
+  title: string;
+  thumbnailUrl: string;
+  capturedAt: string | null;
+  visibilityStatus: "visible" | "hidden";
+  deletedAt: string | null;
+  isCover: boolean;
+};
+
+export type PhotoGroupDetail = PhotoGroupItem & {
+  members: PhotoGroupMember[];
 };
 
 export type SharedNarrativePreview = {
@@ -101,14 +143,24 @@ export const api = {
     return request<{ items: PhotoListItem[] }>(`/api/admin/photos${query}`, undefined, true);
   },
   getAdminPhoto(id: string) {
-    return request<PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string }>(
+    return request<PhotoListItem & {
+      originalAssetPath: string;
+      managedAssetPath: string;
+      displayImageUrl: string;
+      group: PhotoGroupDetail | null;
+    }>(
       `/api/admin/photos/${id}`,
       undefined,
       true
     );
   },
   updatePhoto(id: string, payload: Record<string, unknown>) {
-    return request<PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string }>(
+    return request<PhotoListItem & {
+      originalAssetPath: string;
+      managedAssetPath: string;
+      displayImageUrl: string;
+      group: PhotoGroupDetail | null;
+    }>(
       `/api/admin/photos/${id}`,
       { method: "PATCH", body: JSON.stringify(payload) },
       true
@@ -116,9 +168,69 @@ export const api = {
   },
   regenerateLocationNarrative(id: string) {
     return request<{
-      photo: PhotoListItem & { originalAssetPath: string; managedAssetPath: string; displayImageUrl: string };
+      photo: PhotoListItem & {
+        originalAssetPath: string;
+        managedAssetPath: string;
+        displayImageUrl: string;
+        group: PhotoGroupDetail | null;
+      };
       updatedCount: number;
     }>(`/api/admin/photos/${id}/regenerate-description`, { method: "POST" }, true);
+  },
+  listAdminPhotoGroups(query = "") {
+    return request<{ items: PhotoGroupItem[] }>(`/api/admin/photo-groups${query}`, undefined, true);
+  },
+  getAdminPhotoGroup(id: string) {
+    return request<PhotoGroupDetail>(`/api/admin/photo-groups/${id}`, undefined, true);
+  },
+  updatePhotoGroup(id: string, payload: Record<string, unknown>) {
+    return request<{ group: PhotoGroupDetail; items: PhotoListItem[] }>(
+      `/api/admin/photo-groups/${id}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+      true
+    );
+  },
+  setPhotoGroupCover(id: string, photoId: string) {
+    return request<PhotoGroupDetail>(
+      `/api/admin/photo-groups/${id}/set-cover`,
+      { method: "POST", body: JSON.stringify({ photoId }) },
+      true
+    );
+  },
+  regeneratePhotoGroupDescription(id: string) {
+    return request<{ group: PhotoGroupDetail | null; items: PhotoListItem[] }>(
+      `/api/admin/photo-groups/${id}/regenerate-description`,
+      { method: "POST" },
+      true
+    );
+  },
+  mergePhotoGroups(sourceGroupIds: string[], targetGroupId: string) {
+    return request<{ group: PhotoGroupDetail | null; items: PhotoListItem[] }>(
+      "/api/admin/photo-groups/merge",
+      { method: "POST", body: JSON.stringify({ sourceGroupIds, targetGroupId }) },
+      true
+    );
+  },
+  removePhotosFromGroup(id: string, photoIds: string[], mode: "new_group" | "ungrouped") {
+    return request<{ group: PhotoGroupDetail | null; items: PhotoListItem[] }>(
+      `/api/admin/photo-groups/${id}/remove-photos`,
+      { method: "POST", body: JSON.stringify({ photoIds, mode }) },
+      true
+    );
+  },
+  addPhotosToGroup(id: string, photoIds: string[]) {
+    return request<{ group: PhotoGroupDetail | null; items: PhotoListItem[] }>(
+      `/api/admin/photo-groups/${id}/add-photos`,
+      { method: "POST", body: JSON.stringify({ photoIds }) },
+      true
+    );
+  },
+  setPhotoGroupVisibility(id: string, visibilityStatus: "visible" | "hidden") {
+    return request<{ group: PhotoGroupDetail | null; items: PhotoListItem[] }>(
+      `/api/admin/photo-groups/${id}/visibility`,
+      { method: "POST", body: JSON.stringify({ visibilityStatus }) },
+      true
+    );
   },
   createImportJob(filenames: string[]) {
     return request<ImportJob>(

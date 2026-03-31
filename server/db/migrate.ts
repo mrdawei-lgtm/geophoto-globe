@@ -1,6 +1,6 @@
 import { getDb } from "./client.js";
 
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 function hasColumn(tableName: string, columnName: string) {
   const db = getDb();
@@ -129,6 +129,41 @@ export function migrateDatabase() {
     if (!hasColumn("photos", "narrative_prompt")) {
       db.exec(`ALTER TABLE photos ADD COLUMN narrative_prompt TEXT NOT NULL DEFAULT ''`);
     }
+  }
+
+  if (currentVersion < 6) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS photo_groups (
+        id TEXT PRIMARY KEY,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        location_label TEXT NOT NULL DEFAULT '',
+        narrative_prompt TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        description_source TEXT NOT NULL DEFAULT 'none' CHECK (description_source IN ('none', 'auto', 'manual')),
+        geo_country_en TEXT NOT NULL DEFAULT '',
+        geo_region_en TEXT NOT NULL DEFAULT '',
+        geo_locality_en TEXT NOT NULL DEFAULT '',
+        geo_summary_en TEXT NOT NULL DEFAULT '',
+        geo_resolved_at TEXT,
+        cover_photo_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (cover_photo_id) REFERENCES photos(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_groups_coordinates ON photo_groups (latitude, longitude);
+      CREATE INDEX IF NOT EXISTS idx_photo_groups_cover_photo_id ON photo_groups (cover_photo_id);
+    `);
+
+    if (!hasColumn("photos", "photo_group_id")) {
+      db.exec(`ALTER TABLE photos ADD COLUMN photo_group_id TEXT REFERENCES photo_groups(id) ON DELETE SET NULL`);
+    }
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_photos_photo_group_id ON photos (photo_group_id);
+      CREATE INDEX IF NOT EXISTS idx_photos_latitude_longitude ON photos (latitude, longitude);
+    `);
   }
 
   db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);

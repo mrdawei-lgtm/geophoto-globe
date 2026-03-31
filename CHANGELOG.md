@@ -2,6 +2,32 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.12 - 2026-03-31
+
+### Changed
+
+- Changed the admin top toolbar into a denser combined layout with integrated search, filters, smaller action buttons, and a more compact overall height
+- Changed admin work-queue buttons so clicking an already-active queue now clears that queue and immediately refreshes the list with the default filter state
+- Changed admin photo cards to use an even smaller thumbnail footprint, show the selection checkbox and place label on the same first row, truncate long place names with hover tooltips, and expose the group entry as a text-style `n in group` link
+- Changed the admin group-detail modal from a split layout into a single-column editor that surfaces location label, coordinates, shared prompt, shared intro, and group actions before the member thumbnail area
+- Changed group-member thumbnails in the group-detail modal to be substantially smaller, hide filenames, open the photo on thumbnail click, and use a text-style `Set cover` action instead of a button
+
+## 0.1.11 - 2026-03-27
+
+### Added
+
+- Added persistent `photo_groups` storage in SQLite so same-location photo groups are now first-class backend records instead of temporary exact-coordinate aggregations
+- Added new admin photo-group APIs for listing, viewing, editing, merging, moving photos between groups, setting a group cover, and changing group visibility
+- Added an admin `Photos | Groups` switcher, group cards, group detail modal, and work-queue shortcuts for common cleanup tasks such as missing GPS, missing place labels, and missing shared intros
+- Added a group sidebar to the single-photo admin page with member thumbnails, previous / next navigation, issue badges, and a direct `Set current as cover` action
+
+### Changed
+
+- Changed public thumbnail and cluster grouping to prefer the persisted `photo_group_id`, so manual split / merge changes from the admin CMS are reflected on the public globe
+- Changed admin photo cards to surface group size, group-cover state, and a direct group action from the list view
+- Changed admin group editing so location label, shared prompt, shared intro, and group coordinates now synchronize back to all member photos for compatibility with existing public and legacy flows
+- Changed GPS coordinate entry in both the single-photo editor and batch GPS modal from separate latitude / longitude fields to a single paste-friendly `latitude, longitude` input
+
 ## 0.1.10 - 2026-03-26
 
 ### Added

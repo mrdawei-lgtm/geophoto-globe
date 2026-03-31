@@ -5,6 +5,7 @@ import type { DescriptionSource } from "../types.js";
 import type { PhotoRecord } from "../types.js";
 import { getDb } from "./client.js";
 import { migrateDatabase } from "./migrate.js";
+import { initializeMissingPhotoGroups } from "./photoGroups.js";
 
 type LegacyPhotoStore = {
   photos: PhotoRecord[];
@@ -16,6 +17,7 @@ function normalizePhoto(record: PhotoRecord): PhotoRecord {
     record.descriptionSource ?? (description.trim() ? "manual" : "none");
   return {
     ...record,
+    photoGroupId: record.photoGroupId ?? null,
     originalAssetPath: normalizeStoredAssetPath(record.originalAssetPath),
     managedAssetPath: normalizeStoredAssetPath(record.managedAssetPath),
     narrativePrompt: record.narrativePrompt ?? "",
@@ -41,6 +43,7 @@ function importLegacyJsonIfNeeded() {
   const insert = db.prepare(`
     INSERT OR IGNORE INTO photos (
       id,
+      photo_group_id,
       original_asset_path,
       managed_asset_path,
       thumbnail_url,
@@ -66,6 +69,7 @@ function importLegacyJsonIfNeeded() {
       updated_at
     ) VALUES (
       @id,
+      @photoGroupId,
       @originalAssetPath,
       @managedAssetPath,
       @thumbnailUrl,
@@ -161,8 +165,10 @@ export function bootstrapDatabase() {
   recoverInterruptedImportItems();
   const imported = importLegacyJsonIfNeeded();
   const normalizedAssetPaths = normalizeStoredPhotoAssetPaths();
+  const photoGroups = initializeMissingPhotoGroups();
   return {
     ...imported,
-    normalizedAssetPaths
+    normalizedAssetPaths,
+    photoGroups
   };
 }

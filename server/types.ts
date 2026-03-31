@@ -11,6 +11,7 @@ export type GeoSummaryFields = {
 
 export type PhotoRecord = {
   id: string;
+  photoGroupId: string | null;
   originalAssetPath: string;
   managedAssetPath: string;
   thumbnailUrl: string;
@@ -36,12 +37,50 @@ export type PhotoRecord = {
   updatedAt: string;
 };
 
+export type PhotoGroupRecord = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  locationLabel: string;
+  narrativePrompt: string;
+  description: string;
+  descriptionSource: DescriptionSource;
+  geoCountryEn: string;
+  geoRegionEn: string;
+  geoLocalityEn: string;
+  geoSummaryEn: string;
+  geoResolvedAt: string | null;
+  coverPhotoId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PhotoListFilters = {
   visibilityStatus?: VisibilityStatus;
   hasGeo?: boolean;
   hasLocationLabel?: boolean;
   deleted?: boolean;
   q?: string;
+};
+
+export type PhotoGroupIssueType =
+  | "all"
+  | "missing_location_label"
+  | "missing_description"
+  | "mixed_visibility"
+  | "mixed_location_label"
+  | "orphaned_cover";
+
+export type PhotoGroupDescriptionStatus = "all" | "missing" | "auto" | "manual";
+
+export type PhotoGroupListFilters = {
+  q?: string;
+  visibilityStatus?: VisibilityStatus;
+  descriptionStatus?: PhotoGroupDescriptionStatus;
+  hasPrompt?: boolean;
+  hasDeleted?: boolean;
+  hasHidden?: boolean;
+  issueType?: PhotoGroupIssueType;
 };
 
 export type ImportJobStatus = "pending" | "running" | "completed" | "failed" | "partial";

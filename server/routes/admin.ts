@@ -3,7 +3,7 @@ import type { RequestHandler } from "express";
 import multer from "multer";
 import { uploadsRoot } from "../config.js";
 import { PhotoService } from "../services/photoService.js";
-import type { PhotoListFilters, VisibilityStatus } from "../types.js";
+import type { PhotoGroupListFilters, PhotoListFilters, VisibilityStatus } from "../types.js";
 
 function readIds(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -125,7 +125,7 @@ export function createAdminRouter({
   });
 
   router.get("/photos/:id", requireAdmin, (req, res) => {
-    const photo = photoService.getPhoto(String(req.params.id));
+    const photo = photoService.getAdminPhoto(String(req.params.id));
     if (!photo) {
       res.status(404).json({ error: "Photo not found" });
       return;
@@ -178,6 +178,155 @@ export function createAdminRouter({
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "Failed to regenerate AI intro" });
     }
+  });
+
+  router.get("/photo-groups", requireAdmin, (req, res) => {
+    const filters: PhotoGroupListFilters = {};
+    const keyword = String(req.query.q || "").trim();
+    if (keyword) {
+      filters.q = keyword;
+    }
+    if (req.query.visibilityStatus === "visible" || req.query.visibilityStatus === "hidden") {
+      filters.visibilityStatus = req.query.visibilityStatus as VisibilityStatus;
+    }
+    if (
+      req.query.descriptionStatus === "all" ||
+      req.query.descriptionStatus === "missing" ||
+      req.query.descriptionStatus === "auto" ||
+      req.query.descriptionStatus === "manual"
+    ) {
+      filters.descriptionStatus = req.query.descriptionStatus;
+    }
+    if (req.query.hasPrompt === "true") {
+      filters.hasPrompt = true;
+    }
+    if (req.query.hasPrompt === "false") {
+      filters.hasPrompt = false;
+    }
+    if (req.query.hasDeleted === "true") {
+      filters.hasDeleted = true;
+    }
+    if (req.query.hasDeleted === "false") {
+      filters.hasDeleted = false;
+    }
+    if (req.query.hasHidden === "true") {
+      filters.hasHidden = true;
+    }
+    if (req.query.hasHidden === "false") {
+      filters.hasHidden = false;
+    }
+    if (
+      req.query.issueType === "all" ||
+      req.query.issueType === "missing_location_label" ||
+      req.query.issueType === "missing_description" ||
+      req.query.issueType === "mixed_visibility" ||
+      req.query.issueType === "mixed_location_label" ||
+      req.query.issueType === "orphaned_cover"
+    ) {
+      filters.issueType = req.query.issueType;
+    }
+    res.json({ items: photoService.listAdminPhotoGroups(filters) });
+  });
+
+  router.get("/photo-groups/:id", requireAdmin, (req, res) => {
+    const group = photoService.getAdminPhotoGroup(String(req.params.id));
+    if (!group) {
+      res.status(404).json({ error: "Photo group not found" });
+      return;
+    }
+    res.json(group);
+  });
+
+  router.patch("/photo-groups/:id", requireAdmin, async (req, res) => {
+    try {
+      const latitude = hasOwn(req.body, "latitude") ? Number(req.body.latitude) : undefined;
+      const longitude = hasOwn(req.body, "longitude") ? Number(req.body.longitude) : undefined;
+      const result = await photoService.updatePhotoGroup(String(req.params.id), {
+        locationLabel: hasOwn(req.body, "locationLabel") ? String(req.body.locationLabel ?? "") : undefined,
+        narrativePrompt: hasOwn(req.body, "narrativePrompt") ? String(req.body.narrativePrompt ?? "") : undefined,
+        description: hasOwn(req.body, "description") ? String(req.body.description ?? "") : undefined,
+        latitude: Number.isFinite(latitude) ? latitude : undefined,
+        longitude: Number.isFinite(longitude) ? longitude : undefined
+      });
+      if (!result) {
+        res.status(404).json({ error: "Photo group not found" });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to update photo group" });
+    }
+  });
+
+  router.post("/photo-groups/:id/set-cover", requireAdmin, (req, res) => {
+    try {
+      const photoId = String(req.body.photoId || "");
+      const result = photoService.setPhotoGroupCover(String(req.params.id), photoId);
+      if (!result) {
+        res.status(404).json({ error: "Photo group not found" });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to set cover photo" });
+    }
+  });
+
+  router.post("/photo-groups/:id/regenerate-description", requireAdmin, async (req, res) => {
+    try {
+      const result = await photoService.regeneratePhotoGroupDescription(String(req.params.id));
+      if (!result) {
+        res.status(404).json({ error: "Photo group not found" });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to regenerate group description" });
+    }
+  });
+
+  router.post("/photo-groups/merge", requireAdmin, (req, res) => {
+    const sourceGroupIds = readIds(req.body.sourceGroupIds);
+    const targetGroupId = String(req.body.targetGroupId || "");
+    const result = photoService.mergePhotoGroups(sourceGroupIds, targetGroupId);
+    if (!result) {
+      res.status(404).json({ error: "Target photo group not found" });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post("/photo-groups/:id/remove-photos", requireAdmin, (req, res) => {
+    const mode = req.body.mode === "ungrouped" ? "ungrouped" : "new_group";
+    const result = photoService.removePhotosFromGroup(String(req.params.id), readIds(req.body.photoIds), mode);
+    if (!result) {
+      res.status(404).json({ error: "Photo group not found" });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post("/photo-groups/:id/add-photos", requireAdmin, (req, res) => {
+    try {
+      const result = photoService.addPhotosToGroup(String(req.params.id), readIds(req.body.photoIds));
+      if (!result) {
+        res.status(404).json({ error: "Photo group not found" });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to add photos to group" });
+    }
+  });
+
+  router.post("/photo-groups/:id/visibility", requireAdmin, (req, res) => {
+    const visibilityStatus = req.body.visibilityStatus === "hidden" ? "hidden" : "visible";
+    const result = photoService.setPhotoGroupVisibility(String(req.params.id), visibilityStatus);
+    if (!result) {
+      res.status(404).json({ error: "Photo group not found" });
+      return;
+    }
+    res.json(result);
   });
 
   router.post("/import-jobs", requireAdmin, (req, res) => {

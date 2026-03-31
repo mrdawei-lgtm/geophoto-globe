@@ -6,6 +6,7 @@ import type { DescriptionSource } from "../types.js";
 
 type PhotoRow = {
   id: string;
+  photo_group_id: string | null;
   original_asset_path: string;
   managed_asset_path: string;
   thumbnail_url: string;
@@ -34,6 +35,7 @@ type PhotoRow = {
 function mapPhotoRow(row: PhotoRow): PhotoRecord {
   return {
     id: row.id,
+    photoGroupId: row.photo_group_id,
     originalAssetPath: normalizeStoredAssetPath(row.original_asset_path),
     managedAssetPath: normalizeStoredAssetPath(row.managed_asset_path),
     thumbnailUrl: row.thumbnail_url,
@@ -63,6 +65,7 @@ function mapPhotoRow(row: PhotoRow): PhotoRecord {
 function mapPhotoParams(record: PhotoRecord) {
   return {
     id: record.id,
+    photoGroupId: record.photoGroupId,
     originalAssetPath: normalizeStoredAssetPath(record.originalAssetPath),
     managedAssetPath: normalizeStoredAssetPath(record.managedAssetPath),
     thumbnailUrl: record.thumbnailUrl,
@@ -136,6 +139,19 @@ export class PhotoRepository {
     return row ? mapPhotoRow(row) : null;
   }
 
+  listByIds(ids: string[]) {
+    if (!ids.length) {
+      return [];
+    }
+    const placeholders = ids.map((_, index) => `@id${index}`).join(", ");
+    const params = ids.reduce<Record<string, SQLInputValue>>((result, id, index) => {
+      result[`id${index}`] = id;
+      return result;
+    }, {});
+    const rows = this.db.prepare(`SELECT * FROM photos WHERE id IN (${placeholders})`).all(params) as PhotoRow[];
+    return rows.map(mapPhotoRow);
+  }
+
   listByCoordinates(latitude: number, longitude: number) {
     const rows = this.db
       .prepare("SELECT * FROM photos WHERE latitude = ? AND longitude = ?")
@@ -143,10 +159,18 @@ export class PhotoRepository {
     return rows.map(mapPhotoRow);
   }
 
+  listByGroupId(groupId: string) {
+    const rows = this.db
+      .prepare("SELECT * FROM photos WHERE photo_group_id = ? ORDER BY COALESCE(captured_at, imported_at) DESC, imported_at DESC")
+      .all(groupId) as PhotoRow[];
+    return rows.map(mapPhotoRow);
+  }
+
   upsert(record: PhotoRecord) {
     this.db.prepare(`
       INSERT INTO photos (
         id,
+        photo_group_id,
         original_asset_path,
         managed_asset_path,
         thumbnail_url,
@@ -172,6 +196,7 @@ export class PhotoRepository {
         updated_at
       ) VALUES (
         @id,
+        @photoGroupId,
         @originalAssetPath,
         @managedAssetPath,
         @thumbnailUrl,
@@ -198,6 +223,7 @@ export class PhotoRepository {
       )
       ON CONFLICT(id) DO UPDATE SET
         original_asset_path = excluded.original_asset_path,
+        photo_group_id = excluded.photo_group_id,
         managed_asset_path = excluded.managed_asset_path,
         thumbnail_url = excluded.thumbnail_url,
         display_image_url = excluded.display_image_url,

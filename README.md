@@ -73,20 +73,28 @@ Implemented or currently in scope:
 
 - 图片列表页  
   Photo list page
-- 缩略图展示  
-  Thumbnail cards
+- 照片组列表页  
+  Photo-group list page
+- 紧凑缩略图卡片与分组入口  
+  Compact thumbnail cards with inline group entry points
 - 图片详情编辑页  
   Photo detail editor
+- 单图页组侧栏与组内导航  
+  Group sidebar and in-group navigation in the single-photo editor
 - 无 GPS 照片筛选  
   Missing-GPS filtering
 - 无地名照片筛选  
   Missing-place-label filtering
 - 手动设置 GPS  
   Manual GPS editing
+- 粘贴式坐标输入  
+  Paste-friendly coordinate input
 - 根据地址联网搜索经纬度  
   Geocoding by address search
 - 后台首页可控制前台测试窗口开关  
   Toggle the public homepage debug panel from the admin list page
+- 工作队列快捷筛选与一键切换 / 取消  
+  Work-queue shortcuts with one-click apply / clear behavior
 - 批量删除  
   Batch soft delete
 - 批量恢复  
@@ -95,14 +103,20 @@ Implemented or currently in scope:
   Batch show / hide
 - 批量设置 GPS  
   Batch GPS update
+- 组封面设置  
+  Group cover-photo selection
+- 拆组 / 合组  
+  Group split / merge actions
+- 单列组详情弹窗与组内紧凑缩略图管理  
+  Single-column group detail modal with compact in-group thumbnail management
 - 批量导入照片  
   Batch photo import
 - 永久清理已软删除照片  
   Permanent purge for soft-deleted photos
 - 单图详情页显示 GPS 反查地理信息  
   Show reverse-geocoded location details on the single-photo detail page
-- 单图详情页可单独重生成同坐标组 AI 简介  
-  Regenerate the shared AI intro for one exact coordinate group from the single-photo detail page
+- 单图详情页可单独重生成当前照片组 AI 简介  
+  Regenerate the shared AI intro for the current photo group from the single-photo detail page
 
 管理员操作逻辑：  
 Admin workflow:
@@ -115,15 +129,19 @@ Admin workflow:
    Review imported thumbnails
 4. 点击缩略图进入单图编辑  
    Open a photo editor
-5. 编辑标题、介绍、地点标签、拍摄时间  
+5. 在 `Photos` 与 `Groups` 两个视图之间切换  
+   Switch between `Photos` and `Groups` views
+6. 编辑标题、介绍、地点标签、拍摄时间  
    Edit title, description, location label, and capture time
-   同坐标照片共用一段地点简介  
-   Photos with the exact same coordinates share one location intro
-6. 对无 GPS 图片手动补点  
+   同组照片共用一段地点简介和 prompt  
+   Photos in the same group share one location intro and prompt
+7. 对无 GPS 图片手动补点  
    Add GPS to photos missing coordinates
-7. 输入地址搜索坐标并确认写入  
+8. 输入地址搜索坐标并确认写入  
    Search for coordinates by address and save them
-8. 进行批量显示 / 隐藏、删除 / 恢复、GPS 设置  
+9. 进入组详情编辑地点名称、坐标、prompt、简介，并设置封面图、拆组 / 合组、整组显示 / 隐藏  
+   Open a group detail view to edit the location label, coordinates, prompt, and intro, then set a cover photo, split / merge groups, or show / hide the whole group
+10. 进行批量显示 / 隐藏、删除 / 恢复、GPS 设置  
    Perform batch visibility, delete / restore, and GPS actions
 
 ## 视觉资源说明 | Visual Asset Credits
@@ -226,6 +244,7 @@ Design principles:
 Each photo currently includes at least these fields:
 
 - `id`
+- `photoGroupId`
 - `originalAssetPath`
 - `managedAssetPath`
 - `thumbnailUrl`
@@ -244,6 +263,25 @@ Each photo currently includes at least these fields:
 - `importedAt`
 - `updatedAt`
 
+照片组当前至少包含以下字段：  
+Each photo group currently includes at least these fields:
+
+- `id`
+- `latitude`
+- `longitude`
+- `locationLabel`
+- `narrativePrompt`
+- `description`
+- `descriptionSource`
+- `geoCountryEn`
+- `geoRegionEn`
+- `geoLocalityEn`
+- `geoSummaryEn`
+- `geoResolvedAt`
+- `coverPhotoId`
+- `createdAt`
+- `updatedAt`
+
 状态规则：  
 State rules:
 
@@ -255,8 +293,12 @@ State rules:
   Deletion is soft deletion via `deletedAt`
 - 前台只显示 `visible + deletedAt = null + hasGeo = true` 的记录  
   The public frontend only shows `visible + deletedAt = null + hasGeo = true`
-- 同一精确坐标的照片共享 `description`  
-  Photos at the exact same coordinates share the same `description`
+- 第一版照片组仍按精确经纬度初始化，但后台之后以 `photo_group_id` 作为组标识  
+  The first version still initializes groups from exact coordinates, but the admin backend now treats `photo_group_id` as the source of truth
+- 同组照片共享 `description`、`narrativePrompt`、`locationLabel` 与地理摘要字段  
+  Photos in the same group share `description`, `narrativePrompt`, `locationLabel`, and the resolved geo-summary fields
+- 每个组可以指定一张 `coverPhotoId` 作为后台和前台分组展示的代表缩略图  
+  Each group can assign one `coverPhotoId` as the representative thumbnail for admin and public grouped views
 
 ## 图片导入流程 | Photo Import Flow
 
@@ -279,8 +321,8 @@ After upload, the server processes each photo as follows:
      Parse EXIF metadata
    - 提取拍摄时间、GPS、海拔  
      Extract capture time, GPS, and altitude
-   - 若已有 GPS，则按同坐标组生成或复用中文简介  
-     If GPS already exists, generate or reuse a shared Chinese intro for that coordinate group
+   - 若已有 GPS，则生成或复用对应照片组的中文简介  
+     If GPS already exists, generate or reuse the shared Chinese intro for the corresponding photo group
    - 生成缩略图到 `storage/thumbs`  
      Generate a thumbnail in `storage/thumbs`
    - 生成展示图到 `storage/display`  
@@ -347,14 +389,16 @@ Legacy compatibility:
 管理员在图片编辑页可：  
 In the photo editor, the admin can:
 
-- 直接输入经纬度  
-  Enter coordinates directly
+- 直接粘贴 `latitude, longitude` 形式的坐标  
+  Paste coordinates directly in `latitude, longitude` format
 - 输入地址搜索坐标  
   Search by address
-- 编辑 `description` 时，同坐标照片会自动同步  
-  Editing `description` automatically syncs the same text to photos at the exact same coordinates
-- 保存后更新数据库，并同步同坐标组的共享简介逻辑  
-  Save changes to the database and update shared-intro behavior for the exact coordinate group
+- 编辑 `description`、`locationLabel`、`narrativePrompt` 时，同组照片会自动同步  
+  Editing `description`, `locationLabel`, or `narrativePrompt` automatically syncs the same group-level values to all photos in the same group
+- 在组侧栏中查看组封面、组成员缩略图、上一张 / 下一张导航，并可把当前照片设为组封面  
+  Use the group sidebar to inspect the group cover, member thumbnails, previous / next navigation, and set the current photo as the group cover
+- 保存后更新数据库，并同步当前组的共享字段逻辑  
+  Saving updates the database and synchronizes current group-level shared fields
 
 ### 批量设置 GPS | Batch GPS Update
 
@@ -363,12 +407,32 @@ The first version uses a shared-location batch GPS mode:
 
 - 选中多张照片  
   Select multiple photos
-- 输入一组经纬度，或输入一个地址  
-  Enter one coordinate pair or one address
+- 输入一组 `latitude, longitude` 坐标，或输入一个地址  
+  Enter one `latitude, longitude` pair or one address
 - 系统把同一地点写入所有选中照片  
   The system applies the same location to all selected photos
-- 系统随后按该坐标组生成或复用同一段中文简介  
-  The system then generates or reuses one shared Chinese intro for that coordinate group
+- 系统随后把这些照片挂到同一照片组，并按该组生成或复用同一段中文简介  
+  The system then places those photos into the same photo group and generates or reuses one shared Chinese intro for that group
+
+### 照片组管理 | Photo Group Management
+
+后台新增 `Groups` 视图，管理员可：  
+The admin CMS now includes a `Groups` view where the admin can:
+
+- 查看组封面、组内照片数、共享简介状态、prompt 状态和异常标签  
+  Review group cover thumbnails, member counts, shared-intro state, prompt state, and issue tags
+- 打开组详情弹窗，以单列表单编辑地点名称、坐标、共享 prompt 与共享简介  
+  Open a group detail modal with a single-column form for location label, coordinates, shared prompt, and shared intro
+- 选定组封面图  
+  Choose a group cover image
+- 点击组内缩略图直接进入单图页  
+  Open the single-photo editor directly by clicking a member thumbnail
+- 把选中成员拆成新组或移出为未分组  
+  Split selected members into a new group or remove them into an ungrouped state
+- 选中多个组后合并到第一选中的目标组  
+  Merge multiple groups into the first selected target group
+- 整组显示 / 隐藏  
+  Show or hide an entire group
 
 ## API 摘要 | API Summary
 
@@ -384,6 +448,15 @@ The first version uses a shared-location batch GPS mode:
 - `GET /api/admin/photos/:id`
 - `PATCH /api/admin/photos/:id`
 - `POST /api/admin/photos/:id/regenerate-description`
+- `GET /api/admin/photo-groups`
+- `GET /api/admin/photo-groups/:id`
+- `PATCH /api/admin/photo-groups/:id`
+- `POST /api/admin/photo-groups/:id/set-cover`
+- `POST /api/admin/photo-groups/:id/regenerate-description`
+- `POST /api/admin/photo-groups/merge`
+- `POST /api/admin/photo-groups/:id/remove-photos`
+- `POST /api/admin/photo-groups/:id/add-photos`
+- `POST /api/admin/photo-groups/:id/visibility`
 - `POST /api/admin/import-jobs`
 - `POST /api/admin/import-jobs/:id/files`
 - `POST /api/admin/photos/import`
@@ -485,8 +558,8 @@ Verification checklist:
   Open `http://localhost:5173` and confirm the public globe renders with published photos
 - 打开 `http://localhost:5173/admin/login`，使用 `.env` 里的 `ADMIN_PASSWORD` 登录 CMS  
   Open `http://localhost:5173/admin/login` and sign in with `ADMIN_PASSWORD` from `.env`
-- 在后台给一张无 GPS 图片补点，确认会自动接入同坐标共享简介  
-  Add GPS to a photo that was missing coordinates and confirm it receives the shared intro for that coordinate group
+- 在后台给一张无 GPS 图片补点，确认会自动接入对应照片组的共享简介  
+  Add GPS to a photo that was missing coordinates and confirm it joins the expected photo group and receives that group's shared intro
 
 ## 服务器部署 | Deployment
 
@@ -630,24 +703,40 @@ The current codebase already delivers a working first version, including:
   Bottom-left debug metrics panel including FPS, hidden by default and toggleable from the admin CMS
 - 后台 CMS 登录  
   Admin CMS login
+- 后台 `Photos | Groups` 双视图  
+  Dual `Photos | Groups` admin views
 - 批量导入照片  
   Batch photo import
 - 管理端上传弹窗与最小化上传悬浮条  
   Admin upload modal with a minimizable floating upload dock
 - 单图编辑  
   Single-photo editing
+- 单图页组侧栏、组内导航与设封面功能  
+  Single-photo group sidebar, in-group navigation, and cover-photo actions
 - 地址搜索坐标  
   Address geocoding
+- 粘贴式坐标输入  
+  Paste-friendly coordinate input
 - 后台列表固定工具栏与独立滚动缩略图区  
   Sticky admin toolbar with an independently scrolling thumbnail region
+- 后台紧凑工具栏、整合搜索筛选与更小尺寸操作按钮  
+  Compact admin toolbar with integrated search / filters and smaller action buttons
+- 后台工作队列快捷入口与可切换取消的筛选状态  
+  Admin work-queue shortcuts with toggle-off behavior
+- 后台照片卡片首行地点标签、截断提示与组入口文字链接  
+  Admin photo cards with first-row place labels, hover-tooltips for truncated names, and text-style group links
 - 批量显示 / 隐藏  
   Batch visibility updates
 - 批量软删除 / 恢复 / 永久清理  
   Batch soft delete / restore / purge
 - 批量 GPS 设置  
   Batch GPS updates
-- 同坐标共享 AI 简介与后台手动同步  
-  Shared AI intros per exact coordinate group with manual sync from the admin editor
+- 持久化照片组与组封面图  
+  Persistent photo groups and group cover images
+- 同组共享 AI 简介与后台手动同步  
+  Shared AI intros per persisted photo group with manual sync from the admin editor
+- 单列组详情编辑、拆组 / 合组、整组显隐与更小成员缩略图  
+  Single-column group-detail editing, split / merge actions, whole-group visibility changes, and smaller member thumbnails
 - 单图详情页返回、地理摘要显示与单组 AI 重生成功能  
   Detail-page back navigation, geo summary display, and per-group AI regeneration
 - SQLite 元数据存储  
@@ -679,6 +768,8 @@ Additional notes:
   Frontend upload concurrency is currently fixed at `2`
 - 还没有回收站独立页面  
   No dedicated recycle-bin page yet
+- 组筛选和工作队列目前仍是轻量级列表过滤，不是完整任务面板  
+  Group filters and work queues are still lightweight list filters rather than a full task dashboard
 - 还没有地理编码缓存与限流队列  
   No geocoding cache or rate-limit queue yet
 - 还没有 2D 降级浏览页  

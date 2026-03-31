@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { Express } from "express";
 import { appRoot } from "../config.js";
 import { ingestUploadedFile, parseMetadata, readCapturedAtFromExif, toPublicPath } from "../image.js";
 import { ImportJobRepository } from "../repositories/importJobRepository.js";
+import { PhotoGroupRepository } from "../repositories/photoGroupRepository.js";
 import { PhotoRepository } from "../repositories/photoRepository.js";
 import { GeoSummaryService, emptyGeoSummaryFields } from "./geoSummaryService.js";
 import { LocationNarrativeService } from "./locationNarrativeService.js";
@@ -12,6 +14,8 @@ import type {
   DescriptionSource,
   ImportJobWithItems,
   PhotoListFilters,
+  PhotoGroupListFilters,
+  PhotoGroupRecord,
   PhotoRecord,
   VisibilityStatus
 } from "../types.js";
@@ -25,6 +29,44 @@ type UpdatePhotoInput = {
   visibilityStatus?: VisibilityStatus;
   latitude?: number | null;
   longitude?: number | null;
+};
+
+type UpdatePhotoGroupInput = {
+  locationLabel?: string;
+  narrativePrompt?: string;
+  description?: string;
+  latitude?: number;
+  longitude?: number;
+};
+
+type GroupSyncOptions = {
+  forceRegenerate?: boolean;
+};
+
+type PhotoGroupMemberSummary = {
+  id: string;
+  title: string;
+  thumbnailUrl: string;
+  capturedAt: string | null;
+  visibilityStatus: VisibilityStatus;
+  deletedAt: string | null;
+  isCover: boolean;
+};
+
+type PhotoGroupDetail = PhotoGroupRecord & {
+  photoCount: number;
+  visibleCount: number;
+  hiddenCount: number;
+  deletedCount: number;
+  issues: string[];
+  coverThumbnailUrl: string | null;
+  members: PhotoGroupMemberSummary[];
+};
+
+type EnrichedPhotoRecord = PhotoRecord & {
+  groupPhotoCount: number;
+  photoGroupCoverThumbnailUrl: string | null;
+  isGroupCover: boolean;
 };
 
 function readTitleFromFilename(originalName: string) {
@@ -57,18 +99,18 @@ function publicAssetPathToAbsolute(urlPath: string | null | undefined) {
   return path.join(appRoot, normalized);
 }
 
-function groupPhotosByExactCoordinates(photos: PhotoRecord[]) {
+function groupPhotosForAdmin(photos: PhotoRecord[]) {
   const grouped = new Map<string, PhotoRecord[]>();
   const orderedKeys: string[] = [];
   const ungrouped: PhotoRecord[] = [];
 
   for (const photo of photos) {
-    if (photo.latitude === null || photo.longitude === null) {
+    if (!photo.photoGroupId) {
       ungrouped.push(photo);
       continue;
     }
 
-    const key = `${photo.latitude}:${photo.longitude}`;
+    const key = photo.photoGroupId;
     const existing = grouped.get(key);
     if (existing) {
       existing.push(photo);
@@ -103,8 +145,23 @@ function coordinateKey(photo: { latitude: number | null; longitude: number | nul
   return `${photo.latitude}:${photo.longitude}`;
 }
 
+function explicitGroupKey(photo: { photoGroupId: string | null; latitude: number | null; longitude: number | null }) {
+  return photo.photoGroupId ?? coordinateKey(photo);
+}
+
 function sortByUpdatedAtDesc(photos: PhotoRecord[]) {
   return [...photos].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function sortByGroupDisplayOrder(photos: PhotoRecord[]) {
+  return [...photos].sort((left, right) => {
+    const leftValue = left.capturedAt || left.importedAt;
+    const rightValue = right.capturedAt || right.importedAt;
+    if (leftValue === rightValue) {
+      return right.importedAt.localeCompare(left.importedAt);
+    }
+    return rightValue.localeCompare(leftValue);
+  });
 }
 
 function countCharacters(value: string) {
@@ -159,9 +216,43 @@ export type SharedNarrativeResult = {
   error: string | null;
 };
 
+function pickNonEmptyValue(photos: PhotoRecord[], selector: (photo: PhotoRecord) => string) {
+  return sortByUpdatedAtDesc(photos)
+    .map((photo) => selector(photo).trim())
+    .find(Boolean) ?? "";
+}
+
+function buildPhotoGroupIssues(group: PhotoGroupRecord, members: PhotoRecord[]) {
+  const issues: string[] = [];
+  const activeMembers = members.filter((photo) => !photo.deletedAt);
+  const visibilitySet = new Set(activeMembers.map((photo) => photo.visibilityStatus));
+  const locationLabelSet = new Set(
+    members.map((photo) => photo.locationLabel.trim()).filter(Boolean)
+  );
+
+  if (!group.locationLabel.trim()) {
+    issues.push("missing_location_label");
+  }
+  if (!group.description.trim()) {
+    issues.push("missing_description");
+  }
+  if (visibilitySet.size > 1) {
+    issues.push("mixed_visibility");
+  }
+  if (locationLabelSet.size > 1) {
+    issues.push("mixed_location_label");
+  }
+  if (!group.coverPhotoId || !members.some((photo) => photo.id === group.coverPhotoId && !photo.deletedAt)) {
+    issues.push("orphaned_cover");
+  }
+
+  return issues;
+}
+
 export class PhotoService {
   constructor(
     private readonly photoRepository = new PhotoRepository(),
+    private readonly photoGroupRepository = new PhotoGroupRepository(),
     private readonly importJobRepository = new ImportJobRepository(),
     private readonly geoSummaryService = new GeoSummaryService(),
     private readonly locationNarrativeService = new LocationNarrativeService()
@@ -171,12 +262,139 @@ export class PhotoService {
     return this.photoRepository.list({ visibilityStatus: "visible", deleted: false, hasGeo: true });
   }
 
+  listPublicPhotoGroups() {
+    const photos = sortByGroupDisplayOrder(this.listPublicPhotos());
+    const groups = this.photoGroupRepository.list();
+    const groupMap = new Map(groups.map((group) => [group.id, group] as const));
+    const grouped = new Map<string, PhotoRecord[]>();
+
+    for (const photo of photos) {
+      const key = explicitGroupKey(photo);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(photo);
+      } else {
+        grouped.set(key, [photo]);
+      }
+    }
+
+    return Array.from(grouped.entries()).map(([key, members]) => {
+      const group = members[0].photoGroupId ? groupMap.get(members[0].photoGroupId) ?? null : null;
+      const coverPhoto = members.find((photo) => photo.id === group?.coverPhotoId) ?? members[0];
+      return {
+        id: key,
+        photoId: coverPhoto.id,
+        latitude: group?.latitude ?? coverPhoto.latitude ?? 0,
+        longitude: group?.longitude ?? coverPhoto.longitude ?? 0,
+        count: members.length,
+        coverThumbnailUrl: coverPhoto.thumbnailUrl
+      };
+    });
+  }
+
   listAdminPhotos(filters: PhotoListFilters) {
-    return groupPhotosByExactCoordinates(this.photoRepository.list(filters));
+    return groupPhotosForAdmin(this.enrichPhotosWithGroupSummary(this.photoRepository.list(filters)));
+  }
+
+  listAdminPhotoGroups(filters: PhotoGroupListFilters = {}) {
+    const groups = this.photoGroupRepository.list();
+    const photos = this.photoRepository.list();
+    const photosByGroupId = new Map<string, PhotoRecord[]>();
+
+    for (const photo of photos) {
+      if (!photo.photoGroupId) {
+        continue;
+      }
+      const existing = photosByGroupId.get(photo.photoGroupId);
+      if (existing) {
+        existing.push(photo);
+      } else {
+        photosByGroupId.set(photo.photoGroupId, [photo]);
+      }
+    }
+
+    return groups
+      .map((group) => {
+        const members = sortByGroupDisplayOrder(photosByGroupId.get(group.id) ?? []);
+        if (!members.length) {
+          return null;
+        }
+
+        const activeMembers = members.filter((photo) => !photo.deletedAt);
+        const visibleCount = activeMembers.filter((photo) => photo.visibilityStatus === "visible").length;
+        const hiddenCount = activeMembers.filter((photo) => photo.visibilityStatus === "hidden").length;
+        const deletedCount = members.filter((photo) => Boolean(photo.deletedAt)).length;
+        const coverPhoto = members.find((photo) => photo.id === group.coverPhotoId) ?? activeMembers[0] ?? members[0] ?? null;
+        const issues = buildPhotoGroupIssues(group, members);
+
+        return {
+          ...group,
+          photoCount: members.length,
+          visibleCount,
+          hiddenCount,
+          deletedCount,
+          issues,
+          coverThumbnailUrl: coverPhoto?.thumbnailUrl ?? null
+        };
+      })
+      .filter((group): group is NonNullable<typeof group> => Boolean(group))
+      .filter((group) => this.matchesPhotoGroupFilters(group, filters));
   }
 
   getPhoto(id: string) {
     return this.photoRepository.getById(id);
+  }
+
+  getAdminPhoto(id: string) {
+    const photo = this.photoRepository.getById(id);
+    if (!photo) {
+      return null;
+    }
+
+    const enriched = this.enrichPhotoWithGroupSummary(photo);
+    if (!photo.photoGroupId) {
+      return {
+        ...enriched,
+        group: null
+      };
+    }
+
+    return {
+      ...enriched,
+      group: this.getAdminPhotoGroup(photo.photoGroupId)
+    };
+  }
+
+  getAdminPhotoGroup(id: string): PhotoGroupDetail | null {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+    const members = sortByGroupDisplayOrder(this.photoRepository.listByGroupId(id));
+    if (!members.length) {
+      return null;
+    }
+    const activeMembers = members.filter((photo) => !photo.deletedAt);
+    const coverPhoto = members.find((photo) => photo.id === group.coverPhotoId) ?? activeMembers[0] ?? members[0] ?? null;
+
+    return {
+      ...group,
+      photoCount: members.length,
+      visibleCount: activeMembers.filter((photo) => photo.visibilityStatus === "visible").length,
+      hiddenCount: activeMembers.filter((photo) => photo.visibilityStatus === "hidden").length,
+      deletedCount: members.filter((photo) => Boolean(photo.deletedAt)).length,
+      issues: buildPhotoGroupIssues(group, members),
+      coverThumbnailUrl: coverPhoto?.thumbnailUrl ?? null,
+      members: members.map((photo) => ({
+        id: photo.id,
+        title: photo.title,
+        thumbnailUrl: photo.thumbnailUrl,
+        capturedAt: photo.capturedAt,
+        visibilityStatus: photo.visibilityStatus,
+        deletedAt: photo.deletedAt,
+        isCover: photo.id === group.coverPhotoId
+      }))
+    };
   }
 
   private async resolveGeoSummaryForCoordinates(latitude: number | null, longitude: number | null) {
@@ -186,11 +404,253 @@ export class PhotoService {
     return this.geoSummaryService.resolve(latitude, longitude);
   }
 
-  private listCoordinateGroup(latitude: number | null, longitude: number | null) {
-    if (latitude === null || longitude === null) {
+  private matchesPhotoGroupFilters(
+    group: {
+      locationLabel: string;
+      narrativePrompt: string;
+      description: string;
+      descriptionSource: DescriptionSource;
+      visibleCount: number;
+      hiddenCount: number;
+      deletedCount: number;
+      issues: string[];
+      coverThumbnailUrl: string | null;
+      photoCount: number;
+      latitude: number;
+      longitude: number;
+      geoSummaryEn: string;
+    },
+    filters: PhotoGroupListFilters
+  ) {
+    const keyword = filters.q?.trim().toLowerCase();
+    if (keyword) {
+      const haystack = [
+        group.locationLabel,
+        group.description,
+        group.narrativePrompt,
+        group.geoSummaryEn,
+        String(group.latitude),
+        String(group.longitude)
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(keyword)) {
+        return false;
+      }
+    }
+
+    if (filters.visibilityStatus === "visible" && group.visibleCount === 0) {
+      return false;
+    }
+    if (filters.visibilityStatus === "hidden" && group.hiddenCount === 0) {
+      return false;
+    }
+    if (filters.descriptionStatus === "missing" && group.description.trim()) {
+      return false;
+    }
+    if (filters.descriptionStatus === "auto" && group.descriptionSource !== "auto") {
+      return false;
+    }
+    if (filters.descriptionStatus === "manual" && group.descriptionSource !== "manual") {
+      return false;
+    }
+    if (typeof filters.hasPrompt === "boolean" && filters.hasPrompt !== Boolean(group.narrativePrompt.trim())) {
+      return false;
+    }
+    if (typeof filters.hasDeleted === "boolean" && filters.hasDeleted !== Boolean(group.deletedCount)) {
+      return false;
+    }
+    if (typeof filters.hasHidden === "boolean" && filters.hasHidden !== Boolean(group.hiddenCount)) {
+      return false;
+    }
+    if (filters.issueType && filters.issueType !== "all" && !group.issues.includes(filters.issueType)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private enrichPhotosWithGroupSummary(photos: PhotoRecord[]) {
+    const groups = this.photoGroupRepository.list();
+    const groupMap = new Map(groups.map((group) => [group.id, group] as const));
+    const membersByGroupId = new Map<string, PhotoRecord[]>();
+    for (const photo of this.photoRepository.list()) {
+      if (!photo.photoGroupId) {
+        continue;
+      }
+      const existing = membersByGroupId.get(photo.photoGroupId);
+      if (existing) {
+        existing.push(photo);
+      } else {
+        membersByGroupId.set(photo.photoGroupId, [photo]);
+      }
+    }
+
+    return photos.map((photo) => this.enrichPhotoWithGroupSummary(photo, groupMap, membersByGroupId));
+  }
+
+  private enrichPhotoWithGroupSummary(
+    photo: PhotoRecord,
+    groupMap = new Map(this.photoGroupRepository.list().map((group) => [group.id, group] as const)),
+    membersByGroupId = new Map<string, PhotoRecord[]>()
+  ): EnrichedPhotoRecord {
+    let groupMembers = photo.photoGroupId ? membersByGroupId.get(photo.photoGroupId) : undefined;
+    if (!groupMembers && photo.photoGroupId) {
+      groupMembers = this.photoRepository.listByGroupId(photo.photoGroupId);
+    }
+    const group = photo.photoGroupId ? groupMap.get(photo.photoGroupId) ?? this.photoGroupRepository.getById(photo.photoGroupId) : null;
+    const coverPhoto = groupMembers?.find((member) => member.id === group?.coverPhotoId) ?? null;
+
+    return {
+      ...photo,
+      groupPhotoCount: groupMembers?.length ?? (photo.photoGroupId ? 1 : 0),
+      photoGroupCoverThumbnailUrl: coverPhoto?.thumbnailUrl ?? null,
+      isGroupCover: Boolean(group && group.coverPhotoId === photo.id)
+    };
+  }
+
+  private listGroupMembersByReference(photo: { photoGroupId: string | null; latitude: number | null; longitude: number | null }) {
+    if (photo.photoGroupId) {
+      return this.photoRepository.listByGroupId(photo.photoGroupId);
+    }
+    if (photo.latitude === null || photo.longitude === null) {
       return [];
     }
-    return this.photoRepository.listByCoordinates(latitude, longitude);
+    return this.photoRepository.listByCoordinates(photo.latitude, photo.longitude);
+  }
+
+  private buildPhotoGroupRecord(photos: PhotoRecord[], patch?: Partial<PhotoGroupRecord>): PhotoGroupRecord {
+    const orderedByCapture = sortByGroupDisplayOrder(photos);
+    const anchor = orderedByCapture[0];
+    const now = new Date().toISOString();
+    const description = patch?.description ?? pickNonEmptyValue(photos, (photo) => photo.description);
+    const descriptionSource = patch?.descriptionSource ?? (
+      description
+        ? sortByUpdatedAtDesc(photos).find((photo) => normalizeDescription(photo.description))?.descriptionSource ?? "manual"
+        : "none"
+    );
+
+    return {
+      id: patch?.id ?? crypto.randomUUID(),
+      latitude: patch?.latitude ?? anchor?.latitude ?? 0,
+      longitude: patch?.longitude ?? anchor?.longitude ?? 0,
+      locationLabel: patch?.locationLabel ?? pickNonEmptyValue(photos, (photo) => photo.locationLabel),
+      narrativePrompt: patch?.narrativePrompt ?? latestNarrativePrompt(photos),
+      description,
+      descriptionSource,
+      geoCountryEn: patch?.geoCountryEn ?? pickNonEmptyValue(photos, (photo) => photo.geoCountryEn),
+      geoRegionEn: patch?.geoRegionEn ?? pickNonEmptyValue(photos, (photo) => photo.geoRegionEn),
+      geoLocalityEn: patch?.geoLocalityEn ?? pickNonEmptyValue(photos, (photo) => photo.geoLocalityEn),
+      geoSummaryEn: patch?.geoSummaryEn ?? pickNonEmptyValue(photos, (photo) => photo.geoSummaryEn),
+      geoResolvedAt: patch?.geoResolvedAt ?? sortByUpdatedAtDesc(photos).find((photo) => photo.geoResolvedAt)?.geoResolvedAt ?? null,
+      coverPhotoId: patch?.coverPhotoId ?? anchor?.id ?? null,
+      createdAt: patch?.createdAt ?? anchor?.importedAt ?? now,
+      updatedAt: patch?.updatedAt ?? now
+    };
+  }
+
+  private findAutoJoinGroup(latitude: number, longitude: number) {
+    const matches = this.photoGroupRepository.listByCoordinates(latitude, longitude);
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  private syncGroupFieldsToPhotos(group: PhotoGroupRecord, photos = this.photoRepository.listByGroupId(group.id)) {
+    if (!photos.length) {
+      return [];
+    }
+
+    return this.photoRepository.batchUpdate(
+      photos.map((photo) => photo.id),
+      {
+        photoGroupId: group.id,
+        latitude: group.latitude,
+        longitude: group.longitude,
+        hasGeo: true,
+        locationLabel: group.locationLabel,
+        narrativePrompt: group.narrativePrompt,
+        description: group.description,
+        descriptionSource: group.descriptionSource,
+        geoCountryEn: group.geoCountryEn,
+        geoRegionEn: group.geoRegionEn,
+        geoLocalityEn: group.geoLocalityEn,
+        geoSummaryEn: group.geoSummaryEn,
+        geoResolvedAt: group.geoResolvedAt
+      }
+    );
+  }
+
+  private ensureValidGroupCover(groupId: string) {
+    const group = this.photoGroupRepository.getById(groupId);
+    if (!group) {
+      return null;
+    }
+    const members = sortByGroupDisplayOrder(this.photoRepository.listByGroupId(groupId));
+    if (!members.length) {
+      this.photoGroupRepository.deleteById(groupId);
+      return null;
+    }
+
+    const nextCover = members.find((photo) => photo.id === group.coverPhotoId && !photo.deletedAt)
+      ?? members.find((photo) => !photo.deletedAt)
+      ?? members[0];
+
+    if (nextCover.id !== group.coverPhotoId) {
+      return this.photoGroupRepository.update(groupId, { coverPhotoId: nextCover.id });
+    }
+
+    return group;
+  }
+
+  private async assignPhotosToGroup(
+    photoIds: string[],
+    group: PhotoGroupRecord
+  ) {
+    const now = new Date().toISOString();
+    const members = this.photoRepository.listByIds(photoIds);
+    for (const member of members) {
+      this.photoRepository.update(member.id, {
+        photoGroupId: group.id,
+        latitude: group.latitude,
+        longitude: group.longitude,
+        hasGeo: true,
+        locationLabel: group.locationLabel,
+        narrativePrompt: group.narrativePrompt,
+        description: group.description,
+        descriptionSource: group.descriptionSource,
+        geoCountryEn: group.geoCountryEn,
+        geoRegionEn: group.geoRegionEn,
+        geoLocalityEn: group.geoLocalityEn,
+        geoSummaryEn: group.geoSummaryEn,
+        geoResolvedAt: group.geoResolvedAt,
+        updatedAt: now
+      });
+    }
+    return this.photoRepository.listByGroupId(group.id);
+  }
+
+  private getOrCreatePhotoGroup(
+    latitude: number,
+    longitude: number,
+    patch?: Partial<PhotoGroupRecord>
+  ) {
+    const existing = this.findAutoJoinGroup(latitude, longitude);
+    if (existing) {
+      return this.photoGroupRepository.update(existing.id, {
+        latitude,
+        longitude,
+        ...patch
+      }) ?? existing;
+    }
+
+    return this.photoGroupRepository.create(
+      this.buildPhotoGroupRecord([], {
+        latitude,
+        longitude,
+        descriptionSource: patch?.descriptionSource ?? "none",
+        coverPhotoId: patch?.coverPhotoId ?? null,
+        ...patch
+      })
+    )!;
   }
 
   private async resolveSharedDescriptionForGroup(
@@ -229,20 +689,19 @@ export class PhotoService {
     };
   }
 
-  private async syncSharedDescriptionForCoordinates(
-    latitude: number | null,
-    longitude: number | null,
-    options?: { forceRegenerate?: boolean }
+  private async syncSharedDescriptionForGroup(
+    groupId: string,
+    options?: GroupSyncOptions
   ) {
-    const result = await this.syncSharedDescriptionForCoordinatesDetailed(latitude, longitude, options);
+    const result = await this.syncSharedDescriptionForGroupDetailed(groupId, options);
     return result.photos;
   }
 
-  private async syncSharedDescriptionForCoordinatesDetailed(
-    latitude: number | null,
-    longitude: number | null,
-    options?: { forceRegenerate?: boolean }
+  private async syncSharedDescriptionForGroupDetailed(
+    groupId: string,
+    options?: GroupSyncOptions
   ): Promise<{
+    group: PhotoGroupRecord | null;
     photos: PhotoRecord[];
     resolved: {
       description: string;
@@ -250,51 +709,48 @@ export class PhotoService {
       generation: LocationNarrativeGenerationResult | null;
     } | null;
   }> {
-    const group = this.listCoordinateGroup(latitude, longitude);
-    if (!group.length) {
-      return { photos: [], resolved: null };
+    const group = this.photoGroupRepository.getById(groupId);
+    if (!group) {
+      return { group: null, photos: [], resolved: null };
+    }
+    const photos = this.photoRepository.listByGroupId(groupId);
+    if (!photos.length) {
+      this.photoGroupRepository.deleteById(groupId);
+      return { group: null, photos: [], resolved: null };
     }
 
-    const resolved = await this.resolveSharedDescriptionForGroup(group, options);
-    const needsUpdate = group.some(
-      (photo) =>
-        normalizeDescription(photo.description) !== resolved.description ||
-        photo.descriptionSource !== resolved.descriptionSource
-    );
-
-    if (!needsUpdate) {
-      return {
-        photos: group,
-        resolved
-      };
+    const resolved = await this.resolveSharedDescriptionForGroup(photos, options);
+    const nextGroup = this.photoGroupRepository.update(groupId, {
+      description: resolved.description,
+      descriptionSource: resolved.descriptionSource
+    });
+    if (!nextGroup) {
+      return { group: null, photos: [], resolved };
     }
 
     return {
-      photos: this.photoRepository.batchUpdate(
-        group.map((photo) => photo.id),
-        {
-          description: resolved.description,
-          descriptionSource: resolved.descriptionSource
-        }
-      ),
+      group: nextGroup,
+      photos: this.syncGroupFieldsToPhotos(nextGroup, photos),
       resolved
     };
   }
 
-  private setManualDescriptionForCoordinates(latitude: number, longitude: number, description: string) {
-    const group = this.listCoordinateGroup(latitude, longitude);
-    if (!group.length) {
+  private setManualDescriptionForGroup(groupId: string, description: string) {
+    const group = this.photoGroupRepository.getById(groupId);
+    if (!group) {
       return [];
     }
 
     const normalized = normalizeDescription(description);
-    return this.photoRepository.batchUpdate(
-      group.map((photo) => photo.id),
-      {
-        description: normalized,
-        descriptionSource: inferDescriptionSource(normalized)
-      }
-    );
+    const nextGroup = this.photoGroupRepository.update(groupId, {
+      description: normalized,
+      descriptionSource: inferDescriptionSource(normalized)
+    });
+    if (!nextGroup) {
+      return [];
+    }
+
+    return this.syncGroupFieldsToPhotos(nextGroup);
   }
 
   private buildSharedNarrativeResult(
@@ -347,16 +803,9 @@ export class PhotoService {
     const coordinatesChanged = !sameCoordinates(current, { latitude, longitude });
     const capturedAtChanged = capturedAt !== current.capturedAt;
     const descriptionChanged = input.description !== undefined;
-    const nextDescription = descriptionChanged
-      ? normalizeDescription(input.description)
-      : hasGeo && coordinatesChanged
-        ? ""
-        : current.description;
-    const nextDescriptionSource = descriptionChanged
-      ? inferDescriptionSource(nextDescription)
-      : hasGeo && coordinatesChanged
-        ? ("none" as const)
-        : current.descriptionSource;
+    const locationLabelChanged = input.locationLabel !== undefined && input.locationLabel !== current.locationLabel;
+    const narrativePromptChanged = input.narrativePrompt !== undefined && input.narrativePrompt !== current.narrativePrompt;
+    const nextDescription = descriptionChanged ? normalizeDescription(input.description) : current.description;
 
     const shouldRefreshGeoSummary =
       !hasGeo ||
@@ -372,43 +821,118 @@ export class PhotoService {
           geoResolvedAt: current.geoResolvedAt
         };
 
+    if (!hasGeo) {
+      const updated = this.photoRepository.update(id, {
+        title: input.title ?? current.title,
+        capturedAt,
+        visibilityStatus: input.visibilityStatus ?? current.visibilityStatus,
+        latitude,
+        longitude,
+        hasGeo: false,
+        photoGroupId: null,
+        locationLabel: input.locationLabel ?? current.locationLabel,
+        narrativePrompt: input.narrativePrompt ?? current.narrativePrompt,
+        description: descriptionChanged ? nextDescription : current.description,
+        descriptionSource: descriptionChanged ? inferDescriptionSource(nextDescription) : current.descriptionSource,
+        ...geoSummaryFields
+      });
+      if (current.photoGroupId) {
+        this.ensureValidGroupCover(current.photoGroupId);
+      }
+      return updated ? this.getAdminPhoto(id) : null;
+    }
+
+    const currentGroup = current.photoGroupId ? this.photoGroupRepository.getById(current.photoGroupId) : null;
+    const currentGroupMembers = current.photoGroupId ? this.photoRepository.listByGroupId(current.photoGroupId) : [];
+    const currentGroupWillMove = coordinatesChanged || !current.photoGroupId;
+    const sharedPatch: Partial<PhotoGroupRecord> = {
+      latitude,
+      longitude,
+      locationLabel: input.locationLabel ?? currentGroup?.locationLabel ?? current.locationLabel,
+      narrativePrompt: input.narrativePrompt ?? currentGroup?.narrativePrompt ?? current.narrativePrompt,
+      geoCountryEn: geoSummaryFields.geoCountryEn,
+      geoRegionEn: geoSummaryFields.geoRegionEn,
+      geoLocalityEn: geoSummaryFields.geoLocalityEn,
+      geoSummaryEn: geoSummaryFields.geoSummaryEn,
+      geoResolvedAt: geoSummaryFields.geoResolvedAt
+    };
+    if (descriptionChanged) {
+      sharedPatch.description = nextDescription;
+      sharedPatch.descriptionSource = inferDescriptionSource(nextDescription);
+    }
+
+    let targetGroup: PhotoGroupRecord;
+    let targetHadMembersBeforeMove = false;
+
+    if (!currentGroupWillMove && currentGroup) {
+      targetGroup = this.photoGroupRepository.update(currentGroup.id, sharedPatch) ?? currentGroup;
+      targetHadMembersBeforeMove = currentGroupMembers.length > 0;
+    } else if (currentGroup && currentGroupMembers.length === 1 && !this.findAutoJoinGroup(latitude, longitude)) {
+      targetGroup = this.photoGroupRepository.update(currentGroup.id, {
+        ...sharedPatch,
+        ...(descriptionChanged
+          ? {}
+          : {
+              description: "",
+              descriptionSource: "none"
+            })
+      }) ?? currentGroup;
+      targetHadMembersBeforeMove = false;
+    } else {
+      const autoJoin = this.findAutoJoinGroup(latitude, longitude);
+      targetHadMembersBeforeMove = Boolean(autoJoin && this.photoRepository.listByGroupId(autoJoin.id).length);
+      targetGroup = this.getOrCreatePhotoGroup(
+        latitude,
+        longitude,
+        autoJoin
+          ? sharedPatch
+          : {
+              ...sharedPatch,
+              description: descriptionChanged ? nextDescription : "",
+              descriptionSource: descriptionChanged ? inferDescriptionSource(nextDescription) : "none"
+            }
+      );
+    }
+
     const updated = this.photoRepository.update(id, {
       title: input.title ?? current.title,
-      narrativePrompt: input.narrativePrompt ?? current.narrativePrompt,
-      description: nextDescription,
-      descriptionSource: nextDescriptionSource,
       capturedAt,
-      locationLabel: input.locationLabel ?? current.locationLabel,
       visibilityStatus: input.visibilityStatus ?? current.visibilityStatus,
       latitude,
       longitude,
-      hasGeo,
+      hasGeo: true,
+      photoGroupId: targetGroup.id,
+      locationLabel: targetGroup.locationLabel,
+      narrativePrompt: targetGroup.narrativePrompt,
+      description: targetGroup.description,
+      descriptionSource: targetGroup.descriptionSource,
       ...geoSummaryFields
     });
     if (!updated) {
       return null;
     }
 
-    if (!hasGeo) {
-      return updated;
+    if (current.photoGroupId && current.photoGroupId !== targetGroup.id) {
+      this.ensureValidGroupCover(current.photoGroupId);
     }
+
+    let syncedPhotos = this.syncGroupFieldsToPhotos(targetGroup);
 
     if (descriptionChanged) {
-      return this.findUpdatedPhoto(this.setManualDescriptionForCoordinates(latitude, longitude, nextDescription), id);
+      syncedPhotos = this.setManualDescriptionForGroup(targetGroup.id, nextDescription);
+    } else if (coordinatesChanged) {
+      if (targetHadMembersBeforeMove && targetGroup.description.trim()) {
+        syncedPhotos = this.syncGroupFieldsToPhotos(targetGroup);
+      } else {
+        syncedPhotos = await this.syncSharedDescriptionForGroup(targetGroup.id);
+      }
+    } else if (capturedAtChanged) {
+      syncedPhotos = await this.syncSharedDescriptionForGroup(targetGroup.id, { forceRegenerate: true });
+    } else if (locationLabelChanged || narrativePromptChanged) {
+      syncedPhotos = this.syncGroupFieldsToPhotos(targetGroup);
     }
 
-    if (coordinatesChanged) {
-      return this.findUpdatedPhoto(await this.syncSharedDescriptionForCoordinates(latitude, longitude), id);
-    }
-
-    if (capturedAtChanged) {
-      return this.findUpdatedPhoto(
-        await this.syncSharedDescriptionForCoordinates(latitude, longitude, { forceRegenerate: true }),
-        id
-      );
-    }
-
-    return updated;
+    return this.getAdminPhoto(id);
   }
 
   async regenerateLocationNarrativeForPhoto(id: string) {
@@ -419,29 +943,19 @@ export class PhotoService {
     if (current.latitude === null || current.longitude === null) {
       throw new Error("Photo must have GPS coordinates before regenerating an AI intro");
     }
-
-    const group = this.listCoordinateGroup(current.latitude, current.longitude);
+    const group = this.listGroupMembersByReference(current);
     if (!group.length) {
-      throw new Error("No photos found for this coordinate group");
+      throw new Error("No photos found for this photo group");
     }
-
-    const generation = await this.locationNarrativeService.generateDetailedForPhotos(group);
-    const description = normalizeDescription(generation.description);
-    if (!description) {
-      throw new Error(generation.error || "AI intro generation returned empty text");
+    const groupId = group[0].photoGroupId;
+    if (!groupId) {
+      throw new Error("Photo group is missing");
     }
-
-    const updatedGroup = this.photoRepository.batchUpdate(
-      group.map((photo) => photo.id),
-      {
-        description,
-        descriptionSource: "auto"
-      }
-    );
+    const synced = await this.syncSharedDescriptionForGroupDetailed(groupId, { forceRegenerate: true });
 
     return {
-      photo: this.findUpdatedPhoto(updatedGroup, id),
-      updatedCount: updatedGroup.length
+      photo: this.getAdminPhoto(id),
+      updatedCount: synced.photos.length
     };
   }
 
@@ -450,7 +964,16 @@ export class PhotoService {
   }
 
   batchDelete(ids: string[]) {
-    return this.photoRepository.batchUpdate(ids, { deletedAt: new Date().toISOString() });
+    const affectedGroupIds = new Set(
+      ids
+        .map((id) => this.photoRepository.getById(id)?.photoGroupId ?? null)
+        .filter((groupId): groupId is string => Boolean(groupId))
+    );
+    const updated = this.photoRepository.batchUpdate(ids, { deletedAt: new Date().toISOString() });
+    for (const groupId of affectedGroupIds) {
+      this.ensureValidGroupCover(groupId);
+    }
+    return updated;
   }
 
   batchRestore(ids: string[]) {
@@ -462,6 +985,7 @@ export class PhotoService {
     let successCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
+    const affectedGroupIds = new Set<string>();
 
     for (const id of ids) {
       const photo = this.photoRepository.getById(id);
@@ -472,6 +996,9 @@ export class PhotoService {
       }
 
       try {
+        if (photo.photoGroupId) {
+          affectedGroupIds.add(photo.photoGroupId);
+        }
         await deleteFileIfPresent(photo.originalAssetPath);
         await deleteFileIfPresent(publicAssetPathToAbsolute(photo.thumbnailUrl));
         await deleteFileIfPresent(publicAssetPathToAbsolute(photo.displayImageUrl));
@@ -486,6 +1013,10 @@ export class PhotoService {
         });
         failedCount += 1;
       }
+    }
+
+    for (const groupId of affectedGroupIds) {
+      this.ensureValidGroupCover(groupId);
     }
 
     return {
@@ -506,33 +1037,33 @@ export class PhotoService {
   }
 
   async batchGps(ids: string[], latitude: number, longitude: number, locationLabel: string, narrativePrompt?: string) {
-    const updated: PhotoRecord[] = [];
     const normalizedPrompt = (narrativePrompt ?? "").trim();
     const geoSummaryFields = await this.resolveGeoSummaryForCoordinates(latitude, longitude);
-    for (const id of ids) {
-      const photo = this.photoRepository.getById(id);
-      if (!photo) {
-        continue;
-      }
-      const result = this.photoRepository.update(id, {
-        latitude,
-        longitude,
-        hasGeo: true,
-        narrativePrompt: normalizedPrompt || photo.narrativePrompt,
-        description: "",
-        descriptionSource: "none",
-        locationLabel: locationLabel || photo.locationLabel,
-        ...geoSummaryFields
-      });
-      if (result) {
-        updated.push(result);
+    const photos = this.photoRepository.listByIds(ids);
+    const oldGroupIds = new Set(
+      photos.map((photo) => photo.photoGroupId).filter((groupId): groupId is string => Boolean(groupId))
+    );
+    const group = this.getOrCreatePhotoGroup(latitude, longitude, {
+      locationLabel,
+      narrativePrompt: normalizedPrompt,
+      description: "",
+      descriptionSource: "none",
+      geoCountryEn: geoSummaryFields.geoCountryEn,
+      geoRegionEn: geoSummaryFields.geoRegionEn,
+      geoLocalityEn: geoSummaryFields.geoLocalityEn,
+      geoSummaryEn: geoSummaryFields.geoSummaryEn,
+      geoResolvedAt: geoSummaryFields.geoResolvedAt
+    });
+
+    await this.assignPhotosToGroup(ids, group);
+    for (const oldGroupId of oldGroupIds) {
+      if (oldGroupId !== group.id) {
+        this.ensureValidGroupCover(oldGroupId);
       }
     }
-    const synced = await this.syncSharedDescriptionForCoordinatesDetailed(latitude, longitude);
+    const synced = await this.syncSharedDescriptionForGroupDetailed(group.id);
     return {
-      items: updated
-        .map((photo) => synced.photos.find((item) => item.id === photo.id) ?? this.photoRepository.getById(photo.id))
-        .filter((photo): photo is PhotoRecord => Boolean(photo)),
+      items: this.enrichPhotosWithGroupSummary(synced.photos.filter((photo) => ids.includes(photo.id))),
       narrative: this.buildSharedNarrativeResult(synced.photos, synced.resolved, {
         latitude,
         longitude,
@@ -550,16 +1081,19 @@ export class PhotoService {
     narrativePrompt?: string
   ) {
     const normalizedPrompt = (narrativePrompt ?? "").trim();
-    if (ids.length && (normalizedPrompt || locationLabel)) {
-      this.photoRepository.batchUpdate(ids, {
-        ...(normalizedPrompt ? { narrativePrompt: normalizedPrompt } : {}),
-        ...(locationLabel ? { locationLabel } : {})
-      });
+    const targetPhoto = this.photoRepository.listByIds(ids)[0]
+      ?? this.photoRepository.list().find((photo) => photo.latitude === latitude && photo.longitude === longitude)
+      ?? null;
+    if (!targetPhoto?.photoGroupId) {
+      return { items: [], narrative: null };
     }
-
-    const synced = await this.syncSharedDescriptionForCoordinatesDetailed(latitude, longitude, { forceRegenerate: true });
+    this.photoGroupRepository.update(targetPhoto.photoGroupId, {
+      ...(normalizedPrompt ? { narrativePrompt: normalizedPrompt } : {}),
+      ...(locationLabel ? { locationLabel } : {})
+    });
+    const synced = await this.syncSharedDescriptionForGroupDetailed(targetPhoto.photoGroupId, { forceRegenerate: true });
     return {
-      items: synced.photos.filter((photo) => ids.includes(photo.id)),
+      items: this.enrichPhotosWithGroupSummary(synced.photos.filter((photo) => ids.includes(photo.id))),
       narrative: this.buildSharedNarrativeResult(synced.photos, synced.resolved, {
         latitude,
         longitude,
@@ -578,17 +1112,20 @@ export class PhotoService {
     narrativePrompt?: string
   ) {
     const normalizedPrompt = (narrativePrompt ?? "").trim();
-    if (ids.length && (normalizedPrompt || locationLabel)) {
-      this.photoRepository.batchUpdate(ids, {
-        ...(normalizedPrompt ? { narrativePrompt: normalizedPrompt } : {}),
-        ...(locationLabel ? { locationLabel } : {})
-      });
+    const targetPhoto = this.photoRepository.listByIds(ids)[0]
+      ?? this.photoRepository.list().find((photo) => photo.latitude === latitude && photo.longitude === longitude)
+      ?? null;
+    if (!targetPhoto?.photoGroupId) {
+      return { items: [], narrative: null };
     }
-
+    this.photoGroupRepository.update(targetPhoto.photoGroupId, {
+      ...(normalizedPrompt ? { narrativePrompt: normalizedPrompt } : {}),
+      ...(locationLabel ? { locationLabel } : {})
+    });
     const normalizedDescription = normalizeDescription(description);
-    const synced = this.setManualDescriptionForCoordinates(latitude, longitude, normalizedDescription);
+    const synced = this.setManualDescriptionForGroup(targetPhoto.photoGroupId, normalizedDescription);
     return {
-      items: synced.filter((photo) => ids.includes(photo.id)),
+      items: this.enrichPhotosWithGroupSummary(synced.filter((photo) => ids.includes(photo.id))),
       narrative: this.buildSharedNarrativeResult(
         synced,
         {
@@ -603,6 +1140,195 @@ export class PhotoService {
           narrativePrompt: normalizedPrompt
         }
       )
+    };
+  }
+
+  async updatePhotoGroup(id: string, input: UpdatePhotoGroupInput) {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+
+    const latitude = input.latitude ?? group.latitude;
+    const longitude = input.longitude ?? group.longitude;
+    const geoSummaryFields =
+      latitude !== group.latitude || longitude !== group.longitude
+        ? await this.resolveGeoSummaryForCoordinates(latitude, longitude)
+        : {
+            geoCountryEn: group.geoCountryEn,
+            geoRegionEn: group.geoRegionEn,
+            geoLocalityEn: group.geoLocalityEn,
+            geoSummaryEn: group.geoSummaryEn,
+            geoResolvedAt: group.geoResolvedAt
+          };
+    const description = input.description === undefined ? group.description : normalizeDescription(input.description);
+    const nextGroup = this.photoGroupRepository.update(id, {
+      latitude,
+      longitude,
+      locationLabel: input.locationLabel ?? group.locationLabel,
+      narrativePrompt: input.narrativePrompt ?? group.narrativePrompt,
+      description,
+      descriptionSource: input.description === undefined ? group.descriptionSource : inferDescriptionSource(description),
+      ...geoSummaryFields
+    });
+    if (!nextGroup) {
+      return null;
+    }
+
+    let syncedPhotos = this.syncGroupFieldsToPhotos(nextGroup);
+    if (input.description === undefined && (latitude !== group.latitude || longitude !== group.longitude)) {
+      syncedPhotos = await this.syncSharedDescriptionForGroup(id);
+    }
+      const detail = this.getAdminPhotoGroup(id);
+      return detail
+        ? {
+            group: detail,
+            items: this.enrichPhotosWithGroupSummary(syncedPhotos)
+          }
+        : null;
+  }
+
+  setPhotoGroupCover(id: string, photoId: string) {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+    const members = this.photoRepository.listByGroupId(id);
+    if (!members.some((photo) => photo.id === photoId)) {
+      throw new Error("Cover photo must belong to this group");
+    }
+    this.photoGroupRepository.update(id, { coverPhotoId: photoId });
+    return this.getAdminPhotoGroup(id);
+  }
+
+  async regeneratePhotoGroupDescription(id: string) {
+    const synced = await this.syncSharedDescriptionForGroupDetailed(id, { forceRegenerate: true });
+    if (!synced.group) {
+      return null;
+    }
+    return {
+      group: this.getAdminPhotoGroup(id),
+      items: this.enrichPhotosWithGroupSummary(synced.photos)
+    };
+  }
+
+  mergePhotoGroups(sourceGroupIds: string[], targetGroupId: string) {
+    const targetGroup = this.photoGroupRepository.getById(targetGroupId);
+    if (!targetGroup) {
+      return null;
+    }
+    const moveGroupIds = sourceGroupIds.filter((groupId) => groupId !== targetGroupId);
+    for (const sourceGroupId of moveGroupIds) {
+      const members = this.photoRepository.listByGroupId(sourceGroupId);
+      this.photoRepository.batchUpdate(
+        members.map((photo) => photo.id),
+        { photoGroupId: targetGroupId }
+      );
+      this.photoGroupRepository.deleteById(sourceGroupId);
+    }
+    const synced = this.syncGroupFieldsToPhotos(targetGroup);
+    this.ensureValidGroupCover(targetGroupId);
+    return {
+      group: this.getAdminPhotoGroup(targetGroupId),
+      items: this.enrichPhotosWithGroupSummary(synced)
+    };
+  }
+
+  removePhotosFromGroup(id: string, photoIds: string[], mode: "new_group" | "ungrouped") {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+    const members = this.photoRepository.listByGroupId(id);
+    const selectedMembers = members.filter((photo) => photoIds.includes(photo.id));
+    if (!selectedMembers.length) {
+      return {
+        group: this.getAdminPhotoGroup(id),
+        items: []
+      };
+    }
+
+    let nextGroupId: string | null = null;
+    if (mode === "new_group") {
+      const newGroup = this.photoGroupRepository.create(
+        this.buildPhotoGroupRecord(selectedMembers, {
+          latitude: group.latitude,
+          longitude: group.longitude,
+          locationLabel: group.locationLabel,
+          narrativePrompt: group.narrativePrompt,
+          description: group.description,
+          descriptionSource: group.descriptionSource,
+          geoCountryEn: group.geoCountryEn,
+          geoRegionEn: group.geoRegionEn,
+          geoLocalityEn: group.geoLocalityEn,
+          geoSummaryEn: group.geoSummaryEn,
+          geoResolvedAt: group.geoResolvedAt,
+          coverPhotoId: sortByGroupDisplayOrder(selectedMembers)[0]?.id ?? null
+        })
+      )!;
+      nextGroupId = newGroup.id;
+    }
+
+    const items = this.photoRepository.batchUpdate(
+      selectedMembers.map((photo) => photo.id),
+      {
+        photoGroupId: nextGroupId,
+        description: group.description,
+        descriptionSource: group.descriptionSource,
+        locationLabel: group.locationLabel,
+        narrativePrompt: group.narrativePrompt
+      }
+    );
+    this.ensureValidGroupCover(id);
+    if (nextGroupId) {
+      this.ensureValidGroupCover(nextGroupId);
+    }
+    return {
+      group: this.getAdminPhotoGroup(id),
+      items: this.enrichPhotosWithGroupSummary(items)
+    };
+  }
+
+  addPhotosToGroup(id: string, photoIds: string[]) {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+    const photos = this.photoRepository.listByIds(photoIds);
+    for (const photo of photos) {
+      if (photo.latitude !== group.latitude || photo.longitude !== group.longitude) {
+        throw new Error("Photos must match the target group's coordinates");
+      }
+    }
+    const oldGroupIds = new Set(
+      photos.map((photo) => photo.photoGroupId).filter((groupId): groupId is string => Boolean(groupId) && groupId !== id)
+    );
+    this.photoRepository.batchUpdate(
+      photos.map((photo) => photo.id),
+      { photoGroupId: id }
+    );
+    const groupSynced = this.syncGroupFieldsToPhotos(group);
+    for (const oldGroupId of oldGroupIds) {
+      this.ensureValidGroupCover(oldGroupId);
+    }
+    return {
+      group: this.getAdminPhotoGroup(id),
+      items: this.enrichPhotosWithGroupSummary(groupSynced.filter((photo) => photoIds.includes(photo.id)))
+    };
+  }
+
+  setPhotoGroupVisibility(id: string, visibilityStatus: VisibilityStatus) {
+    const group = this.photoGroupRepository.getById(id);
+    if (!group) {
+      return null;
+    }
+    const items = this.photoRepository.batchUpdate(
+      this.photoRepository.listByGroupId(id).map((photo) => photo.id),
+      { visibilityStatus }
+    );
+    return {
+      group: this.getAdminPhotoGroup(id),
+      items
     };
   }
 
@@ -645,6 +1371,7 @@ export class PhotoService {
           : emptyGeoSummaryFields();
       const record: PhotoRecord = {
         id: generated.id,
+        photoGroupId: null,
         originalAssetPath: generated.originalTarget,
         managedAssetPath: generated.managedTarget,
         thumbnailUrl: toPublicPath(generated.thumbTarget),
@@ -668,7 +1395,15 @@ export class PhotoService {
 
       this.photoRepository.upsert(record);
       if (record.hasGeo && record.latitude !== null && record.longitude !== null) {
-        await this.syncSharedDescriptionForCoordinates(record.latitude, record.longitude);
+        const group = this.getOrCreatePhotoGroup(record.latitude, record.longitude, {
+          geoCountryEn: geoSummaryFields.geoCountryEn,
+          geoRegionEn: geoSummaryFields.geoRegionEn,
+          geoLocalityEn: geoSummaryFields.geoLocalityEn,
+          geoSummaryEn: geoSummaryFields.geoSummaryEn,
+          geoResolvedAt: geoSummaryFields.geoResolvedAt
+        });
+        await this.assignPhotosToGroup([record.id], group);
+        await this.syncSharedDescriptionForGroup(group.id);
       }
       this.importJobRepository.updateItem(itemId, {
         status: "success",
@@ -739,7 +1474,7 @@ export class PhotoService {
       if (photo.latitude === null || photo.longitude === null) {
         continue;
       }
-      const key = `${photo.latitude}:${photo.longitude}`;
+      const key = explicitGroupKey(photo);
       const existing = groups.get(key);
       if (existing) {
         existing.push(photo);
@@ -766,6 +1501,9 @@ export class PhotoService {
         group.map((photo) => photo.id),
         geoSummaryFields
       );
+      if (firstPhoto.photoGroupId) {
+        this.photoGroupRepository.update(firstPhoto.photoGroupId, geoSummaryFields);
+      }
       updatedCount += group.length;
     }
 
@@ -851,7 +1589,7 @@ export class PhotoService {
       if (photo.latitude === null || photo.longitude === null) {
         continue;
       }
-      const key = coordinateKey(photo);
+      const key = explicitGroupKey(photo);
       const existing = groups.get(key);
       if (existing) {
         existing.push(photo);
@@ -977,13 +1715,23 @@ export class PhotoService {
         };
       }
 
-      this.photoRepository.batchUpdate(
-        group.map((photo) => photo.id),
-        {
+      if (firstPhoto.photoGroupId) {
+        const nextGroup = this.photoGroupRepository.update(firstPhoto.photoGroupId, {
           description: resolved.description,
           descriptionSource: resolved.descriptionSource
+        });
+        if (nextGroup) {
+          this.syncGroupFieldsToPhotos(nextGroup, group);
         }
-      );
+      } else {
+        this.photoRepository.batchUpdate(
+          group.map((photo) => photo.id),
+          {
+            description: resolved.description,
+            descriptionSource: resolved.descriptionSource
+          }
+        );
+      }
       updatedCount += group.length;
       if (resolved.generation?.wasTruncated) {
         truncatedCount += group.length;

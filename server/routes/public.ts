@@ -2,41 +2,42 @@ import { Router } from "express";
 import type { PhotoRecord } from "../types.js";
 import { PhotoService } from "../services/photoService.js";
 
-function buildClusters(photos: PhotoRecord[], deviceTier: string) {
+function buildClusters(
+  photoGroups: Array<{ id: string; photoId: string; latitude: number; longitude: number; count: number; coverThumbnailUrl: string }>,
+  deviceTier: string
+) {
   const step = deviceTier === "mobile" ? 18 : deviceTier === "low" ? 14 : 10;
-  const groups = new Map<string, { latitude: number; longitude: number; count: number; coverThumbnailUrl: string; id: string }>();
-  for (const photo of photos) {
-    const latitude = photo.latitude ?? 0;
-    const longitude = photo.longitude ?? 0;
+  const clustered = new Map<string, { latitude: number; longitude: number; count: number; coverThumbnailUrl: string; id: string }>();
+  for (const groupItem of photoGroups) {
+    const latitude = groupItem.latitude;
+    const longitude = groupItem.longitude;
     const key = `${Math.round(latitude / step)}:${Math.round(longitude / step)}`;
-    const group = groups.get(key);
+    const group = clustered.get(key);
     if (group) {
       group.count += 1;
       group.latitude = (group.latitude + latitude) / 2;
       group.longitude = (group.longitude + longitude) / 2;
     } else {
-      groups.set(key, {
-        id: key,
+      clustered.set(key, {
+        id: groupItem.photoId,
         latitude,
         longitude,
         count: 1,
-        coverThumbnailUrl: photo.thumbnailUrl
+        coverThumbnailUrl: groupItem.coverThumbnailUrl
       });
     }
   }
-  return Array.from(groups.values());
+  return Array.from(clustered.values());
 }
 
-function dedupePhotosByExactCoordinates(photos: PhotoRecord[]) {
-  const groups = new Map<string, PhotoRecord>();
-  for (const photo of photos) {
-    groups.set(`${photo.latitude}:${photo.longitude}`, groups.get(`${photo.latitude}:${photo.longitude}`) ?? photo);
-  }
-  return Array.from(groups.values());
+function groupKey(photo: PhotoRecord) {
+  return photo.photoGroupId ?? `${photo.latitude}:${photo.longitude}`;
 }
 
-function visibleItems(photos: PhotoRecord[]) {
-  return dedupePhotosByExactCoordinates(photos)
+function visibleItems(photos: PhotoRecord[], photoGroups: Array<{ photoId: string }>) {
+  return photoGroups
+    .map((group) => photos.find((photo) => photo.id === group.photoId))
+    .filter((photo): photo is PhotoRecord => Boolean(photo))
     .map((photo) => ({
       id: photo.id,
       latitude: photo.latitude,
@@ -70,9 +71,10 @@ export function createPublicRouter(photoService: PhotoService) {
     const mode = req.query.mode === "items" ? "items" : "cluster";
     const deviceTier = String(req.query.deviceTier || "desktop");
     const photos = sortPublicPhotos(photoService.listPublicPhotos());
+    const publicGroups = photoService.listPublicPhotoGroups();
     res.json({
       mode,
-      items: mode === "items" ? visibleItems(photos) : buildClusters(photos, deviceTier)
+      items: mode === "items" ? visibleItems(photos, publicGroups) : buildClusters(publicGroups, deviceTier)
     });
   });
 
@@ -83,9 +85,7 @@ export function createPublicRouter(photoService: PhotoService) {
       res.status(404).json({ error: "Photo not found" });
       return;
     }
-    const groupItems = publicPhotos.filter(
-      (item) => item.latitude === photo.latitude && item.longitude === photo.longitude
-    );
+    const groupItems = publicPhotos.filter((item) => groupKey(item) === groupKey(photo));
     const groupIndex = groupItems.findIndex((item) => item.id === photo.id);
     res.json({
       ...serializePublicPhoto(photo),

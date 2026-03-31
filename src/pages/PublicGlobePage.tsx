@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trackEvent } from "../analytics";
 import { GlobeScene } from "../components/GlobeScene";
@@ -82,6 +82,19 @@ export function PublicGlobePage() {
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const lightboxMediaRef = useRef<HTMLDivElement | null>(null);
   const lightboxImageRef = useRef<HTMLImageElement | null>(null);
+  const lightboxSwipeRef = useRef<{
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+  }>({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0
+  });
 
   const baseDistance = 4.7;
   const zoomFactor = baseDistance / cameraDistance;
@@ -144,6 +157,10 @@ export function PublicGlobePage() {
   }, [selected?.id, activeIndex]);
 
   useEffect(() => {
+    resetLightboxSwipe();
+  }, [selected?.id, activeIndex, imageFillMode]);
+
+  useEffect(() => {
     function syncFillScrollAxis() {
       const frame = lightboxMediaRef.current;
       const image = lightboxImageRef.current;
@@ -172,6 +189,7 @@ export function PublicGlobePage() {
   }
 
   const currentPhoto = selected?.groupItems[activeIndex] ?? null;
+  const swipeEnabled = Boolean(selected && selected.groupCount > 1 && !imageFillMode);
 
   useEffect(() => {
     if (!selected || !currentPhoto) {
@@ -190,6 +208,13 @@ export function PublicGlobePage() {
     setSelected(null);
     setActiveIndex(0);
     setImageFillMode(false);
+    lightboxSwipeRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0
+    };
   }
 
   function goToPhoto(index: number) {
@@ -198,6 +223,80 @@ export function PublicGlobePage() {
     }
     const nextIndex = (index + selected.groupCount) % selected.groupCount;
     setActiveIndex(nextIndex);
+  }
+
+  function resetLightboxSwipe() {
+    lightboxSwipeRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0
+    };
+  }
+
+  function handleLightboxPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!swipeEnabled || event.pointerType === "mouse") {
+      return;
+    }
+
+    lightboxSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleLightboxPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!swipeEnabled) {
+      return;
+    }
+
+    const swipe = lightboxSwipeRef.current;
+    if (swipe.pointerId !== event.pointerId) {
+      return;
+    }
+
+    swipe.lastX = event.clientX;
+    swipe.lastY = event.clientY;
+  }
+
+  function handleLightboxPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!swipeEnabled) {
+      resetLightboxSwipe();
+      return;
+    }
+
+    const swipe = lightboxSwipeRef.current;
+    if (swipe.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipe.startX;
+    const deltaY = event.clientY - swipe.startY;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resetLightboxSwipe();
+
+    const minimumSwipeDistance = 56;
+    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY) * 1.2;
+    if (!isHorizontalSwipe || Math.abs(deltaX) < minimumSwipeDistance) {
+      return;
+    }
+
+    goToPhoto(activeIndex + (deltaX < 0 ? 1 : -1));
+  }
+
+  function handleLightboxPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    const swipe = lightboxSwipeRef.current;
+    if (swipe.pointerId === event.pointerId && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resetLightboxSwipe();
   }
 
   function handleLightboxImageLoad() {
@@ -297,7 +396,11 @@ export function PublicGlobePage() {
               <div className="lightbox-media-viewport">
                 <div
                   ref={lightboxMediaRef}
-                  className={`lightbox-media-frame ${imageFillMode ? `fill-mode scroll-${fillScrollAxis}` : "fit-mode"}`}
+                  className={`lightbox-media-frame ${imageFillMode ? `fill-mode scroll-${fillScrollAxis}` : "fit-mode"} ${swipeEnabled ? "swipe-enabled" : ""}`}
+                  onPointerDown={handleLightboxPointerDown}
+                  onPointerMove={handleLightboxPointerMove}
+                  onPointerUp={handleLightboxPointerEnd}
+                  onPointerCancel={handleLightboxPointerCancel}
                 >
                   <img
                     ref={lightboxImageRef}

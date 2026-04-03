@@ -58,7 +58,7 @@ export const publicThemes: PublicTheme[] = [
       "--theme-thumbnail-overflow-bg":
         "radial-gradient(circle at 30% 25%, rgba(148, 212, 255, 0.34), transparent 58%), linear-gradient(145deg, rgba(13, 28, 38, 0.96), rgba(7, 15, 22, 0.94))",
       "--theme-thumbnail-line": "rgba(220, 236, 245, 0.68)",
-      "--theme-lightbox-backdrop": "rgba(2, 10, 16, 0.86)",
+      "--theme-lightbox-backdrop": "rgba(2, 10, 16, 0.74)",
       "--theme-lightbox-panel-bg": "#06111a",
       "--theme-lightbox-panel-border": "rgba(164, 201, 230, 0.12)",
       "--theme-lightbox-panel-radius": "22px",
@@ -132,7 +132,7 @@ export const publicThemes: PublicTheme[] = [
       "--theme-thumbnail-overflow-bg":
         "linear-gradient(145deg, rgba(7, 14, 24, 0.98), rgba(2, 7, 14, 0.98))",
       "--theme-thumbnail-line": "rgba(96, 140, 198, 0.62)",
-      "--theme-lightbox-backdrop": "rgba(1, 5, 10, 0.92)",
+      "--theme-lightbox-backdrop": "rgba(1, 5, 10, 0.8)",
       "--theme-lightbox-panel-bg": "#02070d",
       "--theme-lightbox-panel-border": "rgba(59, 98, 148, 0.58)",
       "--theme-lightbox-panel-radius": "0px",
@@ -206,7 +206,7 @@ export const publicThemes: PublicTheme[] = [
       "--theme-thumbnail-overflow-bg":
         "linear-gradient(145deg, rgba(247, 248, 250, 0.98), rgba(233, 236, 239, 0.98))",
       "--theme-thumbnail-line": "rgba(66, 80, 93, 0.68)",
-      "--theme-lightbox-backdrop": "rgba(240, 242, 245, 0.86)",
+      "--theme-lightbox-backdrop": "rgba(240, 242, 245, 0.72)",
       "--theme-lightbox-panel-bg": "#ffffff",
       "--theme-lightbox-panel-border": "rgba(196, 201, 208, 0.86)",
       "--theme-lightbox-panel-radius": "22px",

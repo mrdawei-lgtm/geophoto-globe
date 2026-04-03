@@ -13,6 +13,8 @@ dist-server/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+data/reports/*
+!data/reports/.gitkeep
 
 uploads/
 storage/

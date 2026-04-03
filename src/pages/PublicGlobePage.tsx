@@ -33,22 +33,23 @@ type LightboxFlight = {
   sourceRect: GlobeSelectionSource["rect"];
   targetRect: GlobeSelectionSource["rect"];
   active: boolean;
+  exiting: boolean;
 };
 
-const LIGHTBOX_OPEN_ANIMATION_MS = 420;
+const LIGHTBOX_OPEN_ANIMATION_MS = 320;
+const LIGHTBOX_REVEAL_SETTLE_MS = 440;
+const LIGHTBOX_FLIGHT_EXIT_MS = 180;
 
 function getLightboxTargetRect(viewport: { width: number; height: number }) {
   const screenWidth = Math.max(viewport.width - 1.1 * 16, 0);
   const screenHeight = Math.max(viewport.height - 1.1 * 16, 0);
   const panelWidth = Math.min(1280, screenWidth);
   const panelHeight = Math.min(viewport.height * 0.95, screenHeight);
-  const mediaWidth = Math.max(panelWidth - 1.3 * 16, 0);
-  const mediaHeight = Math.max(panelHeight - 5.9 * 16, 0);
   return {
-    left: (viewport.width - mediaWidth) / 2,
-    top: (viewport.height - panelHeight) / 2 + 0.65 * 16,
-    width: mediaWidth,
-    height: mediaHeight
+    left: (viewport.width - panelWidth) / 2,
+    top: (viewport.height - panelHeight) / 2,
+    width: panelWidth,
+    height: panelHeight
   };
 }
 
@@ -106,6 +107,7 @@ export function PublicGlobePage() {
   const [imageFillMode, setImageFillMode] = useState(false);
   const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
   const [lightboxStage, setLightboxStage] = useState<"closed" | "flight" | "open">("closed");
+  const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxFlight, setLightboxFlight] = useState<LightboxFlight | null>(null);
   const [launchSource, setLaunchSource] = useState<LightboxLaunchSource | null>(null);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
@@ -113,7 +115,9 @@ export function PublicGlobePage() {
   const lightboxMediaRef = useRef<HTMLDivElement | null>(null);
   const lightboxImageRef = useRef<HTMLImageElement | null>(null);
   const lightboxOpenTimerRef = useRef<number | null>(null);
+  const lightboxFlightExitTimerRef = useRef<number | null>(null);
   const lightboxFlightFrameRef = useRef<number | null>(null);
+  const lightboxEnterFrameRef = useRef<number | null>(null);
   const lightboxSwipeRef = useRef<{
     pointerId: number | null;
     startX: number;
@@ -229,35 +233,50 @@ export function PublicGlobePage() {
       window.clearTimeout(lightboxOpenTimerRef.current);
       lightboxOpenTimerRef.current = null;
     }
+    if (lightboxFlightExitTimerRef.current !== null) {
+      window.clearTimeout(lightboxFlightExitTimerRef.current);
+      lightboxFlightExitTimerRef.current = null;
+    }
     if (lightboxFlightFrameRef.current !== null) {
       window.cancelAnimationFrame(lightboxFlightFrameRef.current);
       lightboxFlightFrameRef.current = null;
+    }
+    if (lightboxEnterFrameRef.current !== null) {
+      window.cancelAnimationFrame(lightboxEnterFrameRef.current);
+      lightboxEnterFrameRef.current = null;
     }
   }
 
   useEffect(() => () => clearLightboxOpenAnimation(), []);
 
   useLayoutEffect(() => {
+    if (selected && lightboxStage === "open" && !launchSource) {
+      return;
+    }
+
     clearLightboxOpenAnimation();
 
     if (!selected || !currentPhoto) {
       setLightboxStage("closed");
+      setLightboxVisible(false);
       setLightboxFlight(null);
       return;
     }
 
     if (prefersReducedMotion || !launchSource || launchSource.photoId !== currentPhoto.id) {
       setLightboxStage("open");
-      setLightboxFlight(null);
+      setLightboxVisible(false);
       return;
     }
 
     const targetRect = getLightboxTargetRect(viewport);
     setLightboxStage("flight");
+    setLightboxVisible(false);
     setLightboxFlight({
       sourceRect: launchSource.rect,
       targetRect,
-      active: false
+      active: false,
+      exiting: false
     });
 
     lightboxFlightFrameRef.current = window.requestAnimationFrame(() => {
@@ -268,12 +287,66 @@ export function PublicGlobePage() {
 
     lightboxOpenTimerRef.current = window.setTimeout(() => {
       setLightboxStage("open");
-      setLightboxFlight(null);
       setLaunchSource(null);
     }, LIGHTBOX_OPEN_ANIMATION_MS);
 
     return () => clearLightboxOpenAnimation();
-  }, [currentPhoto, launchSource, prefersReducedMotion, selected, viewport]);
+  }, [currentPhoto, launchSource, prefersReducedMotion, selected, lightboxStage, viewport]);
+
+  useEffect(() => {
+    if (lightboxStage !== "open") {
+      setLightboxVisible(false);
+      return;
+    }
+
+    setLightboxVisible(false);
+    lightboxEnterFrameRef.current = window.requestAnimationFrame(() => {
+      lightboxEnterFrameRef.current = window.requestAnimationFrame(() => {
+        setLightboxVisible(true);
+      });
+    });
+
+    return () => {
+      if (lightboxEnterFrameRef.current !== null) {
+        window.cancelAnimationFrame(lightboxEnterFrameRef.current);
+        lightboxEnterFrameRef.current = null;
+      }
+    };
+  }, [lightboxStage]);
+
+  useEffect(() => {
+    if (!lightboxVisible || !lightboxFlight || lightboxFlight.exiting) {
+      return;
+    }
+
+    lightboxFlightExitTimerRef.current = window.setTimeout(() => {
+      setLightboxFlight((current) => (current ? { ...current, exiting: true } : current));
+    }, LIGHTBOX_REVEAL_SETTLE_MS);
+
+    return () => {
+      if (lightboxFlightExitTimerRef.current !== null) {
+        window.clearTimeout(lightboxFlightExitTimerRef.current);
+        lightboxFlightExitTimerRef.current = null;
+      }
+    };
+  }, [lightboxFlight, lightboxVisible]);
+
+  useEffect(() => {
+    if (!lightboxFlight?.exiting) {
+      return;
+    }
+
+    lightboxFlightExitTimerRef.current = window.setTimeout(() => {
+      setLightboxFlight(null);
+    }, LIGHTBOX_FLIGHT_EXIT_MS);
+
+    return () => {
+      if (lightboxFlightExitTimerRef.current !== null) {
+        window.clearTimeout(lightboxFlightExitTimerRef.current);
+        lightboxFlightExitTimerRef.current = null;
+      }
+    };
+  }, [lightboxFlight?.exiting]);
 
   async function openPhoto(id: string, source?: GlobeSelectionSource) {
     setLaunchSource(source ? { ...source, photoId: id } : null);
@@ -306,6 +379,7 @@ export function PublicGlobePage() {
     setActiveIndex(0);
     setImageFillMode(false);
     setLightboxStage("closed");
+    setLightboxVisible(false);
     setLightboxFlight(null);
     setLaunchSource(null);
     lightboxSwipeRef.current = {
@@ -485,7 +559,7 @@ export function PublicGlobePage() {
       {lightboxFlight ? (
         <div className="lightbox-flight-layer" aria-hidden="true">
           <div
-            className={`lightbox-flight-image ${lightboxFlight.active ? "is-active" : ""}`}
+            className={`lightbox-flight-image ${lightboxFlight.active ? "is-active" : ""} ${lightboxFlight.exiting ? "is-exiting" : ""}`}
             style={{
               left: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).left}px`,
               top: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).top}px`,
@@ -496,7 +570,8 @@ export function PublicGlobePage() {
         </div>
       ) : null}
       {selected && currentPhoto && lightboxStage === "open" ? (
-        <div className="lightbox is-open" onClick={closeLightbox}>
+        <div className={`lightbox is-open ${lightboxVisible ? "is-visible" : ""}`} onClick={closeLightbox}>
+          <div className="lightbox-backdrop" aria-hidden="true" />
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
             <div className="lightbox-media">
               <div className="lightbox-media-viewport">

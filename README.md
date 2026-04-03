@@ -50,10 +50,10 @@ The public homepage is an interactive 3D globe.
   Initializes globe lighting from the current real-world solar direction at load time while keeping the night side slightly lifted
 - 远景聚合状态下，用户空闲数秒后会短暂浮现单张地点缩略图作为屏保式提示  
   While the globe stays clustered, a brief screensaver-like location thumbnail appears after several seconds of inactivity
-- 点击照片后全屏显示大图和文字介绍，支持右上角关闭与图片填充切换  
-  Opens a full-screen lightbox with image, metadata, a top-right close button, and fit/fill controls
-- 点击缩略图进入灯箱时，会先从缩略图位置展开一个过渡色块，再显示完整灯箱  
-  Opening the lightbox first expands a transition color block from the clicked thumbnail position before revealing the full viewer
+- 点击照片后全屏显示大图和文字介绍，支持左右翻页、右上角关闭与图片填充切换  
+  Opens a full-screen lightbox with image, metadata, previous / next navigation, a top-right close button, and fit/fill controls
+- 点击缩略图进入灯箱时，会先从缩略图位置展开一个过渡色块，放大到完整灯箱外层面板后再切入内容  
+  Opening the lightbox first expands a transition color block from the clicked thumbnail position into the full outer lightbox panel before the content takes over
 - 页面背景会随着地球缩放产生轻微联动  
   The page background scales subtly with globe zoom for a mild sense of depth
 - 地球上显示一组国际城市名称作为参考标注  

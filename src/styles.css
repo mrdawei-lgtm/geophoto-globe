@@ -94,7 +94,7 @@ select {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 30;
+  z-index: 8;
   background: linear-gradient(180deg, rgba(92, 97, 103, 0.72), rgba(92, 97, 103, 0));
   backdrop-filter: blur(10px);
   pointer-events: none;
@@ -122,10 +122,24 @@ select {
 }
 
 .public-page {
+  position: relative;
   padding: 0;
   min-height: 100vh;
-  background: var(--theme-public-background);
+  background: transparent;
   color: var(--theme-shell-color);
+}
+
+.public-page-background {
+  position: fixed;
+  inset: -4vh -4vw;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--theme-public-background);
+  background-position: center;
+  background-size: cover;
+  transform-origin: center;
+  will-change: transform;
+  transition: transform 260ms ease-out;
 }
 
 .hero {
@@ -185,47 +199,16 @@ select {
   position: fixed;
   top: 0.7rem;
   right: 1rem;
-  left: auto;
-  z-index: 31;
-  width: min(360px, calc(100vw - 8.5rem));
-  padding: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.topbar-panel .floating-panel-header {
+  z-index: 120;
+  isolation: isolate;
   display: flex;
+  flex-direction: column;
   justify-content: flex-end;
-}
-
-.topbar-panel .floating-panel-header.floating-panel-controls {
-  justify-content: space-between;
-  gap: 0.55rem;
-}
-
-.topbar-panel .floating-panel-body {
-  margin-top: 0;
-  transform: none;
-}
-
-.topbar-panel .floating-panel-body.open {
-  margin-top: 0.55rem;
-  padding: 0.75rem 0.85rem;
-  background: var(--theme-floating-panel-bg);
-  border: 1px solid var(--theme-floating-panel-border);
-  box-shadow: 0 18px 44px rgba(31, 35, 39, 0.2);
-  backdrop-filter: blur(18px) saturate(140%);
-}
-
-.topbar-panel .floating-summary,
-.topbar-panel .floating-error {
-  font-size: 0.84rem;
-}
-
-.topbar-panel.collapsed {
+  align-items: flex-end;
+  gap: 0.45rem;
   width: auto;
+  max-width: calc(100vw - 2rem);
+  pointer-events: auto;
 }
 
 .floating-panel-header {
@@ -293,8 +276,11 @@ select {
 .theme-switch {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.45rem;
   min-width: 0;
+  position: relative;
+  z-index: 2;
   color: var(--theme-summary-color);
   font-size: 0.74rem;
   letter-spacing: 0.08em;
@@ -306,13 +292,29 @@ select {
 }
 
 .theme-switch select {
-  min-width: 118px;
+  position: relative;
+  z-index: 3;
+  width: auto;
+  min-width: 112px;
+  max-width: 132px;
   padding: 0.45rem 2rem 0.45rem 0.7rem;
   border-radius: 999px;
   border: 1px solid var(--theme-theme-select-border);
   background: var(--theme-theme-select-bg);
   color: var(--theme-theme-select-color);
   appearance: none;
+}
+
+.topbar-error {
+  margin: 0;
+  max-width: min(320px, calc(100vw - 2rem));
+  padding: 0.55rem 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--theme-error-color);
+  background: var(--theme-floating-panel-bg);
+  border: 1px solid var(--theme-floating-panel-border);
+  backdrop-filter: blur(18px) saturate(140%);
 }
 
 .hero-scene {
@@ -375,6 +377,68 @@ select {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.globe-idle-preview-overlay {
+  z-index: 4;
+}
+
+.globe-idle-preview {
+  position: absolute;
+  width: 74px;
+  height: 74px;
+  overflow: hidden;
+  border: 1px solid var(--theme-thumbnail-border);
+  border-radius: var(--theme-thumbnail-radius);
+  background: var(--theme-thumbnail-bg);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 16px 38px rgba(8, 15, 20, 0.36);
+  transform: translate(-50%, -50%) scale(0.82);
+  opacity: 0;
+  transition:
+    opacity 360ms ease,
+    transform 420ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    box-shadow 420ms ease;
+  will-change: transform, opacity;
+}
+
+.globe-idle-preview.visible {
+  opacity: 0.96;
+  transform: translate(-50%, -50%) scale(1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 22px 48px rgba(8, 15, 20, 0.42);
+  animation: globe-idle-preview-reveal 460ms cubic-bezier(0.18, 0.88, 0.24, 1) both;
+}
+
+.globe-idle-preview.hidden {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.88);
+}
+
+.globe-idle-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  user-select: none;
+}
+
+@keyframes globe-idle-preview-reveal {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.72);
+    filter: saturate(0.92) brightness(0.92);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+    filter: saturate(1.04) brightness(1.02);
+  }
+
+  100% {
+    opacity: 0.96;
+    transform: translate(-50%, -50%) scale(1);
+    filter: none;
+  }
 }
 
 .globe-thumbnail-lines {
@@ -1153,6 +1217,8 @@ button.danger {
   place-items: center;
   padding: 0.55rem;
   z-index: 50;
+  opacity: 1;
+  transition: background-color 220ms ease, opacity 220ms ease;
 }
 
 .lightbox-panel {
@@ -1168,6 +1234,14 @@ button.danger {
   padding: 0.65rem;
   border: 1px solid var(--theme-lightbox-panel-border);
   border-radius: var(--theme-lightbox-panel-radius);
+  opacity: 1;
+  transform: none;
+  transition: opacity 280ms ease;
+}
+
+.lightbox.is-open .lightbox-panel {
+  opacity: 1;
+  transform: none;
 }
 
 .lightbox-media {
@@ -1204,6 +1278,17 @@ button.danger {
 .lightbox-media-frame img {
   display: block;
   border-radius: var(--theme-lightbox-frame-radius);
+}
+
+.lightbox-main-image {
+  opacity: 0;
+  transform: none;
+  transition: opacity 260ms ease;
+}
+
+.lightbox.is-open .lightbox-main-image {
+  opacity: 1;
+  transition-delay: 120ms;
 }
 
 .lightbox-media-frame.fit-mode {
@@ -1258,6 +1343,11 @@ button.danger {
   justify-content: space-between;
   gap: 0.5rem;
   min-height: 2.3rem;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 220ms ease,
+    transform 320ms cubic-bezier(0.16, 0.9, 0.2, 1);
 }
 
 .lightbox-media-nav,
@@ -1325,6 +1415,58 @@ button.danger {
   overflow: auto;
   justify-items: center;
   text-align: center;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 240ms ease,
+    transform 360ms cubic-bezier(0.16, 0.9, 0.2, 1);
+}
+
+.lightbox.is-open .lightbox-media-controls,
+.lightbox.is-open .lightbox-copy {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.lightbox.is-open .lightbox-media-controls {
+  transition-delay: 150ms;
+}
+
+.lightbox.is-open .lightbox-copy {
+  transition-delay: 190ms;
+}
+
+.lightbox-flight-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 52;
+}
+
+.lightbox-flight-image {
+  position: fixed;
+  border-radius: var(--theme-thumbnail-radius);
+  background: var(--theme-thumbnail-bg);
+  border: 1px solid var(--theme-thumbnail-border);
+  box-shadow: var(--theme-thumbnail-shadow);
+  opacity: 0.98;
+  transition:
+    left 340ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    top 340ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    width 340ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    height 340ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    border-radius 340ms cubic-bezier(0.2, 0.9, 0.22, 1),
+    border-color 340ms ease,
+    box-shadow 340ms ease,
+    background-color 340ms ease;
+  will-change: left, top, width, height, border-radius;
+}
+
+.lightbox-flight-image.is-active {
+  border-radius: var(--theme-lightbox-frame-radius);
+  background: var(--theme-lightbox-viewport-bg);
+  border-color: var(--theme-lightbox-media-border);
+  box-shadow: none;
 }
 
 .lightbox-position {
@@ -1573,22 +1715,21 @@ button.danger {
   .topbar-panel {
     top: 0.62rem;
     right: 0.85rem;
-    width: min(332px, calc(100vw - 1.7rem));
-    padding: 0;
-  }
-
-  .floating-panel-controls {
-    align-items: stretch;
+    max-width: calc(100vw - 1.7rem);
   }
 
   .theme-switch {
-    flex: 1;
     min-width: 0;
   }
 
   .theme-switch select {
-    min-width: 0;
-    width: 100%;
+    min-width: 96px;
+    max-width: 112px;
+    padding-right: 1.75rem;
+  }
+
+  .topbar-error {
+    max-width: min(260px, calc(100vw - 1.7rem));
   }
 
   .globe-shadow-overlay::before {
@@ -1596,9 +1737,9 @@ button.danger {
     height: max(170vw, 170vh);
   }
 
-  .panel-toggle {
-    min-width: 64px;
-    padding: 0.4rem 0.68rem;
+  .globe-idle-preview {
+    width: 66px;
+    height: 66px;
   }
 
   .lightbox-panel {

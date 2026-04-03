@@ -1,7 +1,7 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { trackEvent } from "../analytics";
-import { GlobeScene } from "../components/GlobeScene";
+import { GlobeScene, type GlobeSelectionSource } from "../components/GlobeScene";
 import { api } from "../lib/api";
 import { useDeviceTier } from "../lib/device";
 import { readPublicDebugPanelVisible } from "../lib/preferences";
@@ -24,6 +24,33 @@ type PublicPhotoGroup = PublicPhoto & {
   groupIndex: number;
   groupCount: number;
 };
+
+type LightboxLaunchSource = GlobeSelectionSource & {
+  photoId: string;
+};
+
+type LightboxFlight = {
+  sourceRect: GlobeSelectionSource["rect"];
+  targetRect: GlobeSelectionSource["rect"];
+  active: boolean;
+};
+
+const LIGHTBOX_OPEN_ANIMATION_MS = 420;
+
+function getLightboxTargetRect(viewport: { width: number; height: number }) {
+  const screenWidth = Math.max(viewport.width - 1.1 * 16, 0);
+  const screenHeight = Math.max(viewport.height - 1.1 * 16, 0);
+  const panelWidth = Math.min(1280, screenWidth);
+  const panelHeight = Math.min(viewport.height * 0.95, screenHeight);
+  const mediaWidth = Math.max(panelWidth - 1.3 * 16, 0);
+  const mediaHeight = Math.max(panelHeight - 5.9 * 16, 0);
+  return {
+    left: (viewport.width - mediaWidth) / 2,
+    top: (viewport.height - panelHeight) / 2 + 0.65 * 16,
+    width: mediaWidth,
+    height: mediaHeight
+  };
+}
 
 function formatGeoPrimaryLabel(label: string) {
   return label.trim() || "Location unavailable";
@@ -71,7 +98,6 @@ export function PublicGlobePage() {
   const [selected, setSelected] = useState<PublicPhotoGroup | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [error, setError] = useState("");
-  const [panelOpen, setPanelOpen] = useState(false);
   const [cameraDistance, setCameraDistance] = useState(4.7);
   const [earthPixelDiameter, setEarthPixelDiameter] = useState(0);
   const [framesPerSecond, setFramesPerSecond] = useState(0);
@@ -79,9 +105,15 @@ export function PublicGlobePage() {
   const [themeId, setThemeId] = useState(() => readPublicThemeId());
   const [imageFillMode, setImageFillMode] = useState(false);
   const [fillScrollAxis, setFillScrollAxis] = useState<"x" | "y">("x");
+  const [lightboxStage, setLightboxStage] = useState<"closed" | "flight" | "open">("closed");
+  const [lightboxFlight, setLightboxFlight] = useState<LightboxFlight | null>(null);
+  const [launchSource, setLaunchSource] = useState<LightboxLaunchSource | null>(null);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const lightboxMediaRef = useRef<HTMLDivElement | null>(null);
   const lightboxImageRef = useRef<HTMLImageElement | null>(null);
+  const lightboxOpenTimerRef = useRef<number | null>(null);
+  const lightboxFlightFrameRef = useRef<number | null>(null);
   const lightboxSwipeRef = useRef<{
     pointerId: number | null;
     startX: number;
@@ -99,6 +131,10 @@ export function PublicGlobePage() {
   const baseDistance = 4.7;
   const zoomFactor = baseDistance / cameraDistance;
   const theme = getPublicTheme(themeId);
+  const backgroundScale = useMemo(() => {
+    const nextScale = 1 + (zoomFactor - 1) * 0.08;
+    return Math.min(1.08, Math.max(0.985, nextScale));
+  }, [zoomFactor]);
   const themeStyle = useMemo(
     () => theme.cssVariables as CSSProperties,
     [theme]
@@ -151,6 +187,8 @@ export function PublicGlobePage() {
   }, [mode, tier]);
 
   const visibleItems = items.mode === mode ? items.values : [];
+  const currentPhoto = selected?.groupItems[activeIndex] ?? null;
+  const swipeEnabled = Boolean(selected && selected.groupCount > 1 && !imageFillMode);
 
   useEffect(() => {
     setImageFillMode(false);
@@ -178,18 +216,76 @@ export function PublicGlobePage() {
     return () => window.removeEventListener("resize", syncFillScrollAxis);
   }, [selected?.id, activeIndex, imageFillMode]);
 
-  async function openPhoto(id: string) {
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const applyPreference = () => setPrefersReducedMotion(mediaQuery.matches);
+    applyPreference();
+    mediaQuery.addEventListener("change", applyPreference);
+    return () => mediaQuery.removeEventListener("change", applyPreference);
+  }, []);
+
+  function clearLightboxOpenAnimation() {
+    if (lightboxOpenTimerRef.current !== null) {
+      window.clearTimeout(lightboxOpenTimerRef.current);
+      lightboxOpenTimerRef.current = null;
+    }
+    if (lightboxFlightFrameRef.current !== null) {
+      window.cancelAnimationFrame(lightboxFlightFrameRef.current);
+      lightboxFlightFrameRef.current = null;
+    }
+  }
+
+  useEffect(() => () => clearLightboxOpenAnimation(), []);
+
+  useLayoutEffect(() => {
+    clearLightboxOpenAnimation();
+
+    if (!selected || !currentPhoto) {
+      setLightboxStage("closed");
+      setLightboxFlight(null);
+      return;
+    }
+
+    if (prefersReducedMotion || !launchSource || launchSource.photoId !== currentPhoto.id) {
+      setLightboxStage("open");
+      setLightboxFlight(null);
+      return;
+    }
+
+    const targetRect = getLightboxTargetRect(viewport);
+    setLightboxStage("flight");
+    setLightboxFlight({
+      sourceRect: launchSource.rect,
+      targetRect,
+      active: false
+    });
+
+    lightboxFlightFrameRef.current = window.requestAnimationFrame(() => {
+      lightboxFlightFrameRef.current = window.requestAnimationFrame(() => {
+        setLightboxFlight((current) => (current ? { ...current, active: true } : current));
+      });
+    });
+
+    lightboxOpenTimerRef.current = window.setTimeout(() => {
+      setLightboxStage("open");
+      setLightboxFlight(null);
+      setLaunchSource(null);
+    }, LIGHTBOX_OPEN_ANIMATION_MS);
+
+    return () => clearLightboxOpenAnimation();
+  }, [currentPhoto, launchSource, prefersReducedMotion, selected, viewport]);
+
+  async function openPhoto(id: string, source?: GlobeSelectionSource) {
+    setLaunchSource(source ? { ...source, photoId: id } : null);
     try {
       const nextSelected = await api.publicPhoto(id);
       setSelected(nextSelected);
       setActiveIndex(nextSelected.groupIndex);
     } catch (err) {
+      setLaunchSource(null);
       setError(err instanceof Error ? err.message : "Failed to open photo");
     }
   }
-
-  const currentPhoto = selected?.groupItems[activeIndex] ?? null;
-  const swipeEnabled = Boolean(selected && selected.groupCount > 1 && !imageFillMode);
 
   useEffect(() => {
     if (!selected || !currentPhoto) {
@@ -205,9 +301,13 @@ export function PublicGlobePage() {
   }, [activeIndex, currentPhoto, selected]);
 
   function closeLightbox() {
+    clearLightboxOpenAnimation();
     setSelected(null);
     setActiveIndex(0);
     setImageFillMode(false);
+    setLightboxStage("closed");
+    setLightboxFlight(null);
+    setLaunchSource(null);
     lightboxSwipeRef.current = {
       pointerId: null,
       startX: 0,
@@ -335,30 +435,23 @@ export function PublicGlobePage() {
 
   return (
     <main className="page public-page" data-theme={theme.id} style={themeStyle}>
-      <div className={`topbar-panel floating-panel ${panelOpen ? "open" : "collapsed"}`}>
-        <div className="floating-panel-header floating-panel-controls">
-          <label className="theme-switch">
-            <span>Theme</span>
-            <select value={theme.id} onChange={(event) => handleThemeChange(event.target.value)} aria-label="Select visual theme">
-              {publicThemes.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="panel-toggle" onClick={() => setPanelOpen((value) => !value)}>
-            {panelOpen ? "Hide" : "Info"}
-          </button>
-        </div>
-        <div className={`floating-panel-body ${panelOpen ? "open" : "collapsed"}`}>
-          <div className="floating-summary">
-            <span>Drag to rotate the globe.</span>
-            <span>Zoom in to switch from clusters to photo cards.</span>
-            <span>Click any photo to open the large preview.</span>
-          </div>
-          {error ? <p className="floating-error">{error}</p> : null}
-        </div>
+      <div
+        className="public-page-background"
+        aria-hidden="true"
+        style={{ transform: `scale(${backgroundScale})` }}
+      />
+      <div className="topbar-panel">
+        <label className="theme-switch">
+          <span>Theme</span>
+          <select value={theme.id} onChange={(event) => handleThemeChange(event.target.value)} aria-label="Select visual theme">
+            {publicThemes.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {error ? <p className="topbar-error">{error}</p> : null}
       </div>
       <section className="hero">
         <div className="globe-shadow-overlay" aria-hidden="true" />
@@ -389,8 +482,21 @@ export function PublicGlobePage() {
           </span>
         </div>
       ) : null}
-      {selected && currentPhoto ? (
-        <div className="lightbox" onClick={closeLightbox}>
+      {lightboxFlight ? (
+        <div className="lightbox-flight-layer" aria-hidden="true">
+          <div
+            className={`lightbox-flight-image ${lightboxFlight.active ? "is-active" : ""}`}
+            style={{
+              left: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).left}px`,
+              top: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).top}px`,
+              width: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).width}px`,
+              height: `${(lightboxFlight.active ? lightboxFlight.targetRect : lightboxFlight.sourceRect).height}px`
+            }}
+          />
+        </div>
+      ) : null}
+      {selected && currentPhoto && lightboxStage === "open" ? (
+        <div className="lightbox is-open" onClick={closeLightbox}>
           <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
             <div className="lightbox-media">
               <div className="lightbox-media-viewport">
@@ -403,6 +509,7 @@ export function PublicGlobePage() {
                   onPointerCancel={handleLightboxPointerCancel}
                 >
                   <img
+                    className="lightbox-main-image"
                     ref={lightboxImageRef}
                     src={currentPhoto.imageUrl}
                     alt={currentPhoto.title}

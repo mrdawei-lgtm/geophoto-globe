@@ -2,6 +2,25 @@
 
 All notable changes to `GeoPhoto Globe` are recorded here.
 
+## 0.1.13 - 2026-04-03
+
+### Added
+
+- Added an idle public-globe screensaver behavior so, while the globe stays in cluster mode and the user remains inactive, a single random visible cluster-cover thumbnail appears briefly on the globe surface and then fades away
+- Added public lightbox opening choreography that grows a projected color block from the clicked thumbnail position into the final media viewport before revealing the lightbox itself
+
+### Changed
+
+- Changed the public top-right controls to remove the old `Info` toggle and keep only the theme selector, with tighter mobile sizing for the theme field
+- Changed public globe auto-rotation so it now uses camera orbit motion instead of physically rotating the globe mesh, keeping real-world light direction visually consistent with the sphere
+- Changed real-world globe lighting to initialize from the current solar direction at page load, while brightening the night side slightly for better readability
+- Changed auto-rotation interaction handling so user drag / zoom gestures temporarily pause camera orbit and resume it smoothly after interaction ends
+- Changed the globe idle-preview picker to avoid recent repeats and rotate across broad geographic regions instead of sampling purely at random
+- Changed public lightbox opening transitions several times toward a cleaner sequence, ending with a pure-color launch block that finishes its expansion before the full lightbox appears
+- Changed the public page background so it now scales subtly with globe zoom for a light depth effect instead of staying completely static
+- Changed public globe initial orientation so each reload now starts with the UTC+8 meridian facing the viewer
+- Changed public header layering so the theme selector stays above the translucent global title bar
+
 ## 0.1.12 - 2026-03-31
 
 ### Changed

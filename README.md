@@ -38,12 +38,24 @@ The public homepage is an interactive 3D globe.
   Shows cluster markers at distant zoom levels
 - 近景下按屏幕中心区域展开为单张照片缩略图，外围继续显示聚合点  
   Expands into individual photo thumbnails near the center of the screen while keeping peripheral markers clustered
-- 右上角支持切换 `Default`、`Dark`、`Bright` 三套公开页主题  
-  Supports `Default`, `Dark`, and `Bright` public themes from the top-right selector
+- 页面初始视角默认让东八区经线朝向观众  
+  Opens with the UTC+8 meridian facing the viewer by default
+- 右上角支持切换 `Default`、`Dark`、`Bright` 三套公开页主题，移动端使用更紧凑的主题选择框  
+  Supports `Default`, `Dark`, and `Bright` public themes from the top-right selector with a tighter mobile field size
 - 桌面端支持 hover 放大缩略图  
   Supports hover enlargement for thumbnails on desktop
+- 地球自动旋转由镜头公转实现，拖拽或缩放时会临时暂停并平滑恢复  
+  Drives auto-rotation through camera orbit, temporarily pausing and smoothly resuming around user drag / zoom interactions
+- 地球光照在页面加载时按当前真实太阳方向初始化，并保留略微提亮的夜面  
+  Initializes globe lighting from the current real-world solar direction at load time while keeping the night side slightly lifted
+- 远景聚合状态下，用户空闲数秒后会短暂浮现单张地点缩略图作为屏保式提示  
+  While the globe stays clustered, a brief screensaver-like location thumbnail appears after several seconds of inactivity
 - 点击照片后全屏显示大图和文字介绍，支持右上角关闭与图片填充切换  
   Opens a full-screen lightbox with image, metadata, a top-right close button, and fit/fill controls
+- 点击缩略图进入灯箱时，会先从缩略图位置展开一个过渡色块，再显示完整灯箱  
+  Opening the lightbox first expands a transition color block from the clicked thumbnail position before revealing the full viewer
+- 页面背景会随着地球缩放产生轻微联动  
+  The page background scales subtly with globe zoom for a mild sense of depth
 - 地球上显示一组国际城市名称作为参考标注  
   Shows a curated set of international city labels as geographic reference points
 
@@ -58,9 +70,11 @@ User browsing flow:
    Browse regional clusters from afar
 4. 拉近后看单张照片缩略图  
    Zoom in to inspect individual thumbnails
-5. 点击照片进入全屏灯箱  
-   Open a full-screen lightbox
-6. 查看图片、介绍、拍摄时间、地点信息  
+5. 若停留在远景聚合态数秒，可看到一张短暂浮现的地点缩略图  
+   If the globe remains clustered and idle for a few seconds, a temporary location thumbnail may appear
+6. 点击照片进入带过渡动画的全屏灯箱  
+   Open an animated full-screen lightbox
+7. 查看图片、介绍、拍摄时间、地点信息  
    View the photo, description, capture time, and location
 
 ### 图片 CMS 后台 | Admin CMS

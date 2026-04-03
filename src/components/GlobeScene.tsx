@@ -1,8 +1,9 @@
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Billboard, Html, OrbitControls, PerspectiveCamera, Text } from "@react-three/drei";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MutableRefObject, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { mesh } from "topojson-client";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
@@ -27,6 +28,16 @@ type PhotoItem = {
   longitude: number;
   thumbnailUrl: string;
   title: string;
+};
+
+export type GlobeSelectionSource = {
+  thumbnailUrl: string;
+  rect: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
 };
 
 type CityLabel = {
@@ -113,8 +124,73 @@ const MIN_CAMERA_DISTANCE = 1.33;
 const MAX_CAMERA_DISTANCE = 9;
 const ITEM_MODE_DISTANCE = 3.5;
 const INITIAL_CAMERA_DISTANCE = 4.7;
+const INITIAL_CENTER_LONGITUDE = 120;
+const INITIAL_AZIMUTH = THREE.MathUtils.degToRad(INITIAL_CENTER_LONGITUDE + 90);
 const CENTRAL_THUMBNAIL_RADIUS_RATIO = 0.8;
 const FULL_THUMBNAIL_DISTANCE = 1.7;
+const SOLAR_LIGHT_DISTANCE = 4.5;
+const IDLE_PREVIEW_DELAY_MS = 5000;
+const IDLE_PREVIEW_DURATION_MS = 5000;
+const MAX_RECENT_IDLE_PREVIEW_IDS = 4;
+const IDLE_PREVIEW_REGION_ORDER = [
+  "north-america",
+  "south-america",
+  "europe",
+  "africa",
+  "west-asia",
+  "east-asia",
+  "oceania"
+] as const;
+
+type IdlePreviewRegion = typeof IDLE_PREVIEW_REGION_ORDER[number];
+
+function normalizeDegrees(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function computeJulianDay(date: Date) {
+  return date.getTime() / 86400000 + 2440587.5;
+}
+
+function computeSolarDirection(date: Date) {
+  const julianDay = computeJulianDay(date);
+  const julianCenturies = (julianDay - 2451545.0) / 36525;
+  const meanLongitude = normalizeDegrees(
+    280.46646 + julianCenturies * (36000.76983 + julianCenturies * 0.0003032)
+  );
+  const meanAnomaly = normalizeDegrees(
+    357.52911 + julianCenturies * (35999.05029 - 0.0001537 * julianCenturies)
+  );
+  const meanAnomalyRadians = THREE.MathUtils.degToRad(meanAnomaly);
+  const equationOfCenter =
+    Math.sin(meanAnomalyRadians) * (1.914602 - julianCenturies * (0.004817 + 0.000014 * julianCenturies)) +
+    Math.sin(2 * meanAnomalyRadians) * (0.019993 - 0.000101 * julianCenturies) +
+    Math.sin(3 * meanAnomalyRadians) * 0.000289;
+  const apparentLongitude = meanLongitude + equationOfCenter - 0.00569;
+  const omegaRadians = THREE.MathUtils.degToRad(125.04 - 1934.136 * julianCenturies);
+  const lambdaRadians = THREE.MathUtils.degToRad(apparentLongitude - 0.00478 * Math.sin(omegaRadians));
+  const obliquityRadians = THREE.MathUtils.degToRad(
+    23.439291 - 0.0130042 * julianCenturies + 0.00256 * Math.cos(omegaRadians)
+  );
+  const rightAscensionRadians = Math.atan2(
+    Math.cos(obliquityRadians) * Math.sin(lambdaRadians),
+    Math.cos(lambdaRadians)
+  );
+  const declinationRadians = Math.asin(Math.sin(obliquityRadians) * Math.sin(lambdaRadians));
+  const julianDayOffset = julianDay - 2451545.0;
+  const greenwichMeanSiderealDegrees = normalizeDegrees(
+    280.46061837 +
+      360.98564736629 * julianDayOffset +
+      0.000387933 * julianCenturies * julianCenturies -
+      (julianCenturies * julianCenturies * julianCenturies) / 38710000
+  );
+  const subsolarLongitude = normalizeDegrees(
+    THREE.MathUtils.radToDeg(rightAscensionRadians) - greenwichMeanSiderealDegrees + 180
+  ) - 180;
+  const subsolarLatitude = THREE.MathUtils.radToDeg(declinationRadians);
+
+  return latLngToVector3(subsolarLatitude, subsolarLongitude, 1).normalize();
+}
 
 function buildEarthTextureUrl(theme: PublicTheme["globe"]) {
   const svg = earthMapSvg
@@ -350,6 +426,65 @@ function clusterPhotoItems(items: PhotoItem[], tier: DeviceTier): ClusterItem[] 
   return Array.from(groups.values());
 }
 
+function getIdlePreviewRegion(latitude: number, longitude: number): IdlePreviewRegion {
+  if (longitude >= -170 && longitude < -20) {
+    return latitude >= 12 ? "north-america" : "south-america";
+  }
+  if (longitude >= -20 && longitude < 30) {
+    return latitude >= 18 ? "europe" : "africa";
+  }
+  if (longitude >= 30 && longitude < 85) {
+    return latitude >= 10 ? "west-asia" : "africa";
+  }
+  if (longitude >= 85 && longitude < 150) {
+    return latitude >= -5 ? "east-asia" : "oceania";
+  }
+  return "oceania";
+}
+
+function chooseIdlePreviewItem(
+  visibleItems: ClusterItem[],
+  recentIds: string[],
+  regionCursor: number
+) {
+  const recentIdSet = new Set(recentIds);
+  const itemsByRegion = new Map<IdlePreviewRegion, ClusterItem[]>();
+
+  for (const item of visibleItems) {
+    const region = getIdlePreviewRegion(item.latitude, item.longitude);
+    const existing = itemsByRegion.get(region) ?? [];
+    existing.push(item);
+    itemsByRegion.set(region, existing);
+  }
+
+  for (let offset = 0; offset < IDLE_PREVIEW_REGION_ORDER.length; offset += 1) {
+    const nextRegionIndex = (regionCursor + offset) % IDLE_PREVIEW_REGION_ORDER.length;
+    const region = IDLE_PREVIEW_REGION_ORDER[nextRegionIndex];
+    const regionItems = itemsByRegion.get(region) ?? [];
+    if (!regionItems.length) {
+      continue;
+    }
+
+    const freshItems = regionItems.filter((item) => !recentIdSet.has(item.id));
+    const candidateItems = freshItems.length ? freshItems : regionItems;
+    const nextItem = candidateItems[Math.floor(Math.random() * candidateItems.length)] ?? null;
+    if (nextItem) {
+      return {
+        item: nextItem,
+        nextRegionCursor: (nextRegionIndex + 1) % IDLE_PREVIEW_REGION_ORDER.length
+      };
+    }
+  }
+
+  const fallbackItems = visibleItems.filter((item) => !recentIdSet.has(item.id));
+  const candidateItems = fallbackItems.length ? fallbackItems : visibleItems;
+  const nextItem = candidateItems[Math.floor(Math.random() * candidateItems.length)] ?? null;
+  return {
+    item: nextItem,
+    nextRegionCursor: regionCursor
+  };
+}
+
 function buildRadialOffsets(count: number, spacing: number) {
   const offsets: Array<{ x: number; y: number }> = [];
   let ring = 0;
@@ -523,25 +658,15 @@ function GlobeMetricsReporter({
 function GlobeShell({
   tier,
   theme,
-  cameraDistance,
-  rotationRef,
-  focus,
-  motionEnabled,
   children
 }: {
   tier: DeviceTier;
   theme: PublicTheme;
-  cameraDistance: number;
-  rotationRef: React.MutableRefObject<number>;
-  focus?: { latitude: number | null; longitude: number | null } | null;
-  motionEnabled: boolean;
   children?: ReactNode;
 }) {
-  const groupRef = useRef<THREE.Group>(null);
   const textureUrl = useMemo(() => buildEarthTextureUrl(theme.globe), [theme.globe]);
   const texture = useLoader(THREE.TextureLoader, textureUrl);
   const { gl } = useThree();
-  const focusRotationRef = useRef<number | null>(null);
   const { coastlinePositions, borderPositions } = useEarthLineGeometries();
   const isMobile = tier === "mobile";
 
@@ -555,36 +680,8 @@ function GlobeShell({
     texture.needsUpdate = true;
   }, [gl, isMobile, texture]);
 
-  useEffect(() => {
-    if (!focus || focus.longitude === null) {
-      focusRotationRef.current = null;
-      return;
-    }
-    focusRotationRef.current = THREE.MathUtils.degToRad(-(focus.longitude + 90));
-  }, [focus]);
-
-  useFrame((_state, delta) => {
-    if (groupRef.current) {
-      if (!motionEnabled) {
-        rotationRef.current = groupRef.current.rotation.y;
-        return;
-      }
-      if (focusRotationRef.current !== null) {
-        groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, focusRotationRef.current, 4.2, delta);
-      } else {
-        const zoomProgress = THREE.MathUtils.clamp(
-          (MAX_CAMERA_DISTANCE - cameraDistance) / (MAX_CAMERA_DISTANCE - MIN_CAMERA_DISTANCE),
-          0,
-          1
-        );
-        const spinFactor = THREE.MathUtils.lerp(1, 0.08, zoomProgress);
-        groupRef.current.rotation.y += delta * 0.05 * spinFactor;
-      }
-      rotationRef.current = groupRef.current.rotation.y;
-    }
-  });
   return (
-    <group ref={groupRef}>
+    <group>
       <mesh>
         <sphereGeometry args={[1, tier === "mobile" ? 48 : 80, tier === "mobile" ? 48 : 80]} />
         {theme.globe.useUnlitMaterial ? (
@@ -643,18 +740,181 @@ function GlobeShell({
   );
 }
 
+function OrbitMotionController({
+  controlsRef,
+  cameraDistance,
+  focus,
+  motionEnabled,
+  interactionActiveRef,
+  resumeMotionAtRef
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  cameraDistance: number;
+  focus?: { latitude: number | null; longitude: number | null } | null;
+  motionEnabled: boolean;
+  interactionActiveRef: RefObject<boolean>;
+  resumeMotionAtRef: RefObject<number>;
+}) {
+  const focusAzimuthRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!focus || focus.longitude === null) {
+      focusAzimuthRef.current = null;
+      return;
+    }
+    focusAzimuthRef.current = THREE.MathUtils.degToRad(focus.longitude + 90);
+  }, [focus]);
+
+  useFrame((_state, delta) => {
+    const controls = controlsRef.current;
+    if (!controls || !motionEnabled) {
+      return;
+    }
+    if (interactionActiveRef.current) {
+      return;
+    }
+    if (performance.now() < (resumeMotionAtRef.current ?? 0)) {
+      return;
+    }
+
+    if (focusAzimuthRef.current !== null) {
+      controls.setAzimuthalAngle(dampAngle(controls.getAzimuthalAngle(), focusAzimuthRef.current, 4.2, delta));
+      return;
+    }
+
+    const zoomProgress = THREE.MathUtils.clamp(
+      (MAX_CAMERA_DISTANCE - cameraDistance) / (MAX_CAMERA_DISTANCE - MIN_CAMERA_DISTANCE),
+      0,
+      1
+    );
+    const spinFactor = THREE.MathUtils.lerp(1.2, 0.08, zoomProgress);
+    controls.setAzimuthalAngle(controls.getAzimuthalAngle() - delta * 0.08 * spinFactor);
+  }, -2);
+
+  return null;
+}
+
+function IdleClusterPreviewLayer({
+  items,
+  activeItemId,
+  visibleItemIdsRef
+}: {
+  items: ClusterItem[];
+  activeItemId: string | null;
+  visibleItemIdsRef: MutableRefObject<string[]>;
+}) {
+  const { camera, size } = useThree();
+  const [previewLayout, setPreviewLayout] = useState<{
+    left: number;
+    top: number;
+    thumbnailUrl: string;
+    visible: boolean;
+  } | null>(null);
+
+  useFrame(() => {
+    const cameraDirection = camera.position.clone().normalize();
+    const visibleItemIds = items.flatMap((item) => {
+      const anchorWorld = latLngToVector3(item.latitude, item.longitude, 1.06);
+      const isVisible = anchorWorld.clone().normalize().dot(cameraDirection) > 0.12;
+      if (!isVisible) {
+        return [];
+      }
+
+      const anchorScreen = projectToScreen(anchorWorld, camera, size.width, size.height);
+      if (anchorScreen.z < -1 || anchorScreen.z > 1) {
+        return [];
+      }
+
+      return [item.id];
+    });
+
+    visibleItemIdsRef.current = visibleItemIds;
+
+    if (!activeItemId) {
+      setPreviewLayout((current) => (current ? null : current));
+      return;
+    }
+
+    const activeItem = items.find((item) => item.id === activeItemId);
+    if (!activeItem) {
+      setPreviewLayout((current) => (current ? null : current));
+      return;
+    }
+
+    const anchorWorld = latLngToVector3(activeItem.latitude, activeItem.longitude, 1.08);
+    const isVisible = anchorWorld.clone().normalize().dot(cameraDirection) > 0.12;
+    if (!isVisible) {
+      setPreviewLayout((current) => (current?.visible === false ? current : {
+        left: current?.left ?? 0,
+        top: current?.top ?? 0,
+        thumbnailUrl: activeItem.coverThumbnailUrl,
+        visible: false
+      }));
+      return;
+    }
+
+    const anchorScreen = projectToScreen(anchorWorld, camera, size.width, size.height);
+    if (anchorScreen.z < -1 || anchorScreen.z > 1) {
+      setPreviewLayout((current) => (current?.visible === false ? current : {
+        left: current?.left ?? 0,
+        top: current?.top ?? 0,
+        thumbnailUrl: activeItem.coverThumbnailUrl,
+        visible: false
+      }));
+      return;
+    }
+
+    setPreviewLayout((current) => {
+      const nextLayout = {
+        left: anchorScreen.x,
+        top: anchorScreen.y,
+        thumbnailUrl: activeItem.coverThumbnailUrl,
+        visible: true
+      };
+      if (
+        current &&
+        current.visible &&
+        current.thumbnailUrl === nextLayout.thumbnailUrl &&
+        Math.abs(current.left - nextLayout.left) < 0.5 &&
+        Math.abs(current.top - nextLayout.top) < 0.5
+      ) {
+        return current;
+      }
+      return nextLayout;
+    });
+  });
+
+  if (!previewLayout || !activeItemId) {
+    return null;
+  }
+
+  return (
+    <Html fullscreen>
+      <div className="globe-thumbnail-overlay globe-idle-preview-overlay" aria-hidden="true">
+        <div
+          className={`globe-idle-preview ${previewLayout.visible ? "visible" : "hidden"}`}
+          style={{
+            left: `${previewLayout.left}px`,
+            top: `${previewLayout.top}px`
+          }}
+        >
+          <img src={previewLayout.thumbnailUrl} alt="" draggable={false} />
+        </div>
+      </div>
+    </Html>
+  );
+}
+
 function ThumbnailOverlayLayer({
   items,
   cameraDistance,
   hoverEnabled,
-  rotationRef,
   onSelect
 }: {
   items: PhotoItem[];
   cameraDistance: number;
   hoverEnabled: boolean;
-  rotationRef: React.MutableRefObject<number>;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, source?: GlobeSelectionSource) => void;
 }) {
   const { camera, size } = useThree();
   const [layout, setLayout] = useState<ThumbnailOverlayItem[]>([]);
@@ -666,12 +926,11 @@ function ThumbnailOverlayLayer({
     : MAX_VISIBLE_THUMBNAILS_PER_COMPONENT;
 
   useFrame(() => {
-    const rotation = rotationRef.current;
     const earthCircle = projectEarthScreenCircle(camera, size.width, size.height);
     const showAllVisibleThumbnails = cameraDistance <= FULL_THUMBNAIL_DISTANCE;
     const visibleItems = items.flatMap((item) => {
-      const anchorWorld = latLngToVector3(item.latitude, item.longitude, 1.01).applyAxisAngle(Y_AXIS, rotation);
-      const thumbnailWorld = latLngToVector3(item.latitude, item.longitude, 1.08).applyAxisAngle(Y_AXIS, rotation);
+      const anchorWorld = latLngToVector3(item.latitude, item.longitude, 1.01);
+      const thumbnailWorld = latLngToVector3(item.latitude, item.longitude, 1.08);
       const cameraDirection = camera.position.clone().normalize();
       const isVisible = anchorWorld.clone().normalize().dot(cameraDirection) > 0.12;
       if (!isVisible) {
@@ -734,7 +993,18 @@ function ThumbnailOverlayLayer({
                   "--thumbnail-size": `${thumbnailSize}px`
                 } as CSSProperties
               }
-              onClick={() => onSelect(item.photoId)}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                onSelect(item.photoId, {
+                  thumbnailUrl: item.thumbnailUrl,
+                  rect: {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                  }
+                });
+              }}
               aria-label={item.title}
               data-hover-enabled={hoverEnabled ? "true" : "false"}
             >
@@ -771,14 +1041,12 @@ function PeripheralClusterMarkers({
   items,
   cameraDistance,
   tier,
-  theme,
-  rotationRef
+  theme
 }: {
   items: PhotoItem[];
   cameraDistance: number;
   tier: DeviceTier;
   theme: PublicTheme;
-  rotationRef: React.MutableRefObject<number>;
 }) {
   const { camera, size } = useThree();
   const [clusters, setClusters] = useState<ClusterItem[]>([]);
@@ -789,10 +1057,9 @@ function PeripheralClusterMarkers({
       return;
     }
 
-    const rotation = rotationRef.current;
     const earthCircle = projectEarthScreenCircle(camera, size.width, size.height);
     const peripheralItems = items.flatMap((item) => {
-      const anchorWorld = latLngToVector3(item.latitude, item.longitude, 1.01).applyAxisAngle(Y_AXIS, rotation);
+      const anchorWorld = latLngToVector3(item.latitude, item.longitude, 1.01);
       const cameraDirection = camera.position.clone().normalize();
       const isVisible = anchorWorld.clone().normalize().dot(cameraDirection) > 0.12;
       if (!isVisible) {
@@ -925,16 +1192,95 @@ export function GlobeScene({
   onCameraDistanceChange?: (distance: number) => void;
   onEarthPixelDiameterChange?: (diameter: number) => void;
   onFramesPerSecondChange?: (fps: number) => void;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, source?: GlobeSelectionSource) => void;
 }) {
   const hoverEnabled = tier !== "mobile";
   const initialDistance = INITIAL_CAMERA_DISTANCE;
+  const initialCameraPosition = useMemo<[number, number, number]>(
+    () => [
+      Math.sin(INITIAL_AZIMUTH) * initialDistance,
+      0,
+      Math.cos(INITIAL_AZIMUTH) * initialDistance
+    ],
+    [initialDistance]
+  );
+  const [solarLightDirection] = useState(() => computeSolarDirection(new Date()));
   const [cameraDistance, setCameraDistance] = useState(initialDistance);
-  const globeRotationRef = useRef(0);
+  const [interactionState, setInteractionState] = useState<"active" | "idle">("idle");
+  const [nextIdlePreviewAt, setNextIdlePreviewAt] = useState(() => Date.now() + IDLE_PREVIEW_DELAY_MS);
+  const [activeIdlePreviewId, setActiveIdlePreviewId] = useState<string | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const interactionActiveRef = useRef(false);
+  const resumeMotionAtRef = useRef(0);
+  const visibleClusterItemIdsRef = useRef<string[]>([]);
+  const idlePreviewRecentIdsRef = useRef<string[]>([]);
+  const idlePreviewRegionCursorRef = useRef(0);
+  const ambientLightIntensity = theme.globe.useUnlitMaterial ? 1.35 : 0.58;
+  const directionalLightIntensity = theme.globe.useUnlitMaterial ? 1.25 : 1.42;
+  const directionalLightPosition = useMemo(
+    () => solarLightDirection.clone().multiplyScalar(SOLAR_LIGHT_DISTANCE),
+    [solarLightDirection]
+  );
+  const clusterItems = mode === "cluster" ? (items as ClusterItem[]) : [];
+  const idlePreviewEnabled = mode === "cluster" && motionEnabled && clusterItems.length > 0;
 
   useEffect(() => {
     setCameraDistance(initialDistance);
   }, [initialDistance]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+    controls.setAzimuthalAngle(INITIAL_AZIMUTH);
+    controls.update();
+  }, []);
+
+  useEffect(() => {
+    if (!idlePreviewEnabled) {
+      setActiveIdlePreviewId(null);
+      return;
+    }
+
+    if (interactionState === "active") {
+      setActiveIdlePreviewId(null);
+      return;
+    }
+
+    if (activeIdlePreviewId) {
+      const hideTimer = window.setTimeout(() => {
+        setActiveIdlePreviewId(null);
+        setNextIdlePreviewAt(Date.now() + IDLE_PREVIEW_DELAY_MS);
+      }, IDLE_PREVIEW_DURATION_MS);
+      return () => window.clearTimeout(hideTimer);
+    }
+
+    const delay = Math.max(nextIdlePreviewAt - Date.now(), 0);
+    const showTimer = window.setTimeout(() => {
+      const visibleIds = visibleClusterItemIdsRef.current;
+      if (!visibleIds.length) {
+        setNextIdlePreviewAt(Date.now() + 1200);
+        return;
+      }
+      const visibleIdSet = new Set(visibleIds);
+      const visibleItems = clusterItems.filter((item) => visibleIdSet.has(item.id));
+      const nextSelection = chooseIdlePreviewItem(
+        visibleItems,
+        idlePreviewRecentIdsRef.current,
+        idlePreviewRegionCursorRef.current
+      );
+      if (nextSelection.item) {
+        idlePreviewRegionCursorRef.current = nextSelection.nextRegionCursor;
+        idlePreviewRecentIdsRef.current = [
+          nextSelection.item.id,
+          ...idlePreviewRecentIdsRef.current.filter((id) => id !== nextSelection.item.id)
+        ].slice(0, MAX_RECENT_IDLE_PREVIEW_IDS);
+        setActiveIdlePreviewId(nextSelection.item.id);
+      }
+    }, delay);
+    return () => window.clearTimeout(showTimer);
+  }, [activeIdlePreviewId, clusterItems, idlePreviewEnabled, interactionState, nextIdlePreviewAt]);
 
   function syncDistance(distance: number) {
     setCameraDistance(distance);
@@ -950,14 +1296,26 @@ export function GlobeScene({
 
   return (
     <Canvas dpr={tier === "desktop" ? [1, 2] : [1, 1.4]} gl={{ antialias: tier === "desktop", alpha: true }}>
-      <ambientLight intensity={1.35} />
-      <directionalLight position={[4, 2, 3]} intensity={1.25} />
-      <PerspectiveCamera makeDefault position={[0, 0, initialDistance]} fov={45} />
+      <ambientLight intensity={ambientLightIntensity} />
+      <directionalLight
+        position={directionalLightPosition.toArray()}
+        intensity={directionalLightIntensity}
+      />
+      <PerspectiveCamera makeDefault position={initialCameraPosition} fov={45} />
       <GlobeMetricsReporter
         onEarthPixelDiameterChange={onEarthPixelDiameterChange}
         onFramesPerSecondChange={onFramesPerSecondChange}
       />
+      <OrbitMotionController
+        controlsRef={controlsRef}
+        cameraDistance={cameraDistance}
+        focus={focus}
+        motionEnabled={motionEnabled}
+        interactionActiveRef={interactionActiveRef}
+        resumeMotionAtRef={resumeMotionAtRef}
+      />
       <OrbitControls
+        ref={controlsRef}
         key={`orbit-controls-${mode}`}
         enablePan={false}
         enableDamping
@@ -969,6 +1327,17 @@ export function GlobeScene({
         target={[0, 0, 0]}
         rotateSpeed={tier === "mobile" ? 0.65 : 0.9}
         zoomSpeed={tier === "mobile" ? 0.65 : 0.8}
+        onStart={() => {
+          interactionActiveRef.current = true;
+          setInteractionState("active");
+          setActiveIdlePreviewId(null);
+        }}
+        onEnd={() => {
+          interactionActiveRef.current = false;
+          resumeMotionAtRef.current = performance.now() + 420;
+          setInteractionState("idle");
+          setNextIdlePreviewAt(Date.now() + IDLE_PREVIEW_DELAY_MS);
+        }}
         onChange={(event) => {
           if (!event) {
             return;
@@ -981,11 +1350,14 @@ export function GlobeScene({
       <GlobeShell
         tier={tier}
         theme={theme}
-        cameraDistance={cameraDistance}
-        rotationRef={globeRotationRef}
-        focus={focus}
-        motionEnabled={motionEnabled}
       >
+        {mode === "cluster" ? (
+          <IdleClusterPreviewLayer
+            items={clusterItems}
+            activeItemId={activeIdlePreviewId}
+            visibleItemIdsRef={visibleClusterItemIdsRef}
+          />
+        ) : null}
         <CityLabels cameraDistance={cameraDistance} theme={theme} />
         {mode === "cluster"
           ? (items as ClusterItem[]).map((item) => <ClusterMarker key={item.id} item={item} theme={theme} />)
@@ -996,7 +1368,6 @@ export function GlobeScene({
             cameraDistance={cameraDistance}
             tier={tier}
             theme={theme}
-            rotationRef={globeRotationRef}
           />
         ) : null}
       </GlobeShell>
@@ -1005,7 +1376,6 @@ export function GlobeScene({
           items={items as PhotoItem[]}
           cameraDistance={cameraDistance}
           hoverEnabled={hoverEnabled}
-          rotationRef={globeRotationRef}
           onSelect={onSelect}
         />
       ) : null}

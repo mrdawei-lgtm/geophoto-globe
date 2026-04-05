@@ -13,6 +13,7 @@ dist-server/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+data/*.bak-*
 data/reports/*
 !data/reports/.gitkeep
 
@@ -23,6 +24,7 @@ storage/
 Thumbs.db
 .vscode/
 .idea/
+.codex/
 
 npm-debug.log*
 yarn-debug.log*

@@ -33,7 +33,13 @@ export const databasePath = process.env.DATABASE_PATH || path.join(dataRoot, "ge
 export const legacyPhotosJsonPath = path.join(dataRoot, "photos.json");
 
 export const port = Number(process.env.PORT || 8787);
-export const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+const configuredAdminPassword = (process.env.ADMIN_PASSWORD || "").trim();
+
+if (!configuredAdminPassword) {
+  throw new Error("ADMIN_PASSWORD must be set in the environment before starting the server");
+}
+
+export const adminPassword = configuredAdminPassword;
 export const adminToken = crypto.createHash("sha256").update(adminPassword).digest("hex");
 export const narrativeApiBaseUrl = (process.env.NARRATIVE_API_BASE_URL || "").trim();
 export const narrativeApiKey = (process.env.NARRATIVE_API_KEY || "").trim();

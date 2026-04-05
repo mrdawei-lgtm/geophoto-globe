@@ -24,6 +24,7 @@ storage/
 Thumbs.db
 .vscode/
 .idea/
+.codex
 .codex/
 
 npm-debug.log*
